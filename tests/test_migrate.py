@@ -1,20 +1,12 @@
 """Tests for the migration logic."""
 
-import json
-import os
-import shutil
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from hermes_migrate.migrate import (
-    OpenClawMigrator,
     HermesInstaller,
     MigrationLogger,
     MigrationResult,
-    OPENCLAW_DIR,
-    HERMES_DIR,
+    OpenClawMigrator,
 )
 
 
@@ -230,7 +222,7 @@ class TestMigrateAgents:
         monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        result = migrator.migrate_agents(sample_openclaw_config)
+        migrator.migrate_agents(sample_openclaw_config)
         content = (tmp_hermes / "memories" / "openclaw_agents.md").read_text()
         assert "ACP" in content
         assert "docker" in content
@@ -353,7 +345,7 @@ class TestMigrateEnvTemplate:
         monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        result = migrator.migrate_env_template(sample_openclaw_config)
+        migrator.migrate_env_template(sample_openclaw_config)
         content = (tmp_hermes / ".env.openclaw").read_text()
         assert "FIRECRAWL_API_KEY" in content
 
@@ -361,7 +353,7 @@ class TestMigrateEnvTemplate:
         monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        result = migrator.migrate_env_template(sample_openclaw_config)
+        migrator.migrate_env_template(sample_openclaw_config)
         content = (tmp_hermes / ".env.openclaw").read_text()
         assert "custom-llm" in content
 
@@ -369,7 +361,7 @@ class TestMigrateEnvTemplate:
         monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        result = migrator.migrate_env_template(sample_openclaw_config)
+        migrator.migrate_env_template(sample_openclaw_config)
         content = (tmp_hermes / ".env.openclaw").read_text()
         assert "TELEGRAM_ALLOWED_USERS" in content
         assert "5594479851" in content
@@ -599,7 +591,7 @@ class TestMigrateCredentials:
     def test_extracts_correct_agent_telegram_token(self, tmp_path, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=False, agent_id="hank")
         with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
-            result = migrator.migrate_credentials(sample_openclaw_config)
+            migrator.migrate_credentials(sample_openclaw_config)
         env_content = (tmp_path / ".env").read_text(encoding="utf-8")
         assert "987654321:ZYXwvuTSRqpoNMLkjiHGFedcba" in env_content
         assert "123456789:" not in env_content

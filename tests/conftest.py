@@ -1,8 +1,6 @@
 """Shared test fixtures for hermes-migrate tests."""
 
-import json
 import pytest
-from pathlib import Path
 
 
 @pytest.fixture

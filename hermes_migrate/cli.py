@@ -7,11 +7,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from .migrate import OpenClawMigrator, HermesInstaller, MigrationLogger, HERMES_DIR, OPENCLAW_DIR
+from . import __version__
+from .migrate import HERMES_DIR, OPENCLAW_DIR, HermesInstaller, MigrationLogger, OpenClawMigrator
 
 
 def _uninstall():
-    """Remove hermes-migrate: symlink, repo clone, and pip package."""
+    """Remove hermes-migrate: symlink, pip package, and optionally the repo clone."""
     import shutil
     import subprocess
 
@@ -23,13 +24,6 @@ def _uninstall():
         symlink.unlink()
         removed.append(str(symlink))
 
-    # Remove the git clone (repo directory)
-    # The wrapper script or __file__ tells us where the repo is
-    repo_dir = Path(__file__).resolve().parent.parent
-    if (repo_dir / ".git").exists() and (repo_dir / "hermes_migrate").is_dir():
-        shutil.rmtree(repo_dir, ignore_errors=True)
-        removed.append(str(repo_dir))
-
     # Try pip uninstall (for pip-installed users)
     try:
         subprocess.run(
@@ -40,6 +34,17 @@ def _uninstall():
         removed.append("pip package")
     except Exception:
         pass
+
+    # Offer to remove the git clone (only if running from one)
+    repo_dir = Path(__file__).resolve().parent.parent
+    if (repo_dir / ".git").exists() and (repo_dir / "hermes_migrate").is_dir():
+        try:
+            answer = input(f"  Also delete the repo clone at {repo_dir}? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer in ("y", "yes"):
+            shutil.rmtree(repo_dir, ignore_errors=True)
+            removed.append(str(repo_dir))
 
     if removed:
         print(f"\n  Cleaned up: {', '.join(removed)}")
@@ -99,7 +104,7 @@ For more info: https://github.com/raulvidis/hermes-migrate
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 1.0.0",
+        version=f"%(prog)s {__version__}",
     )
 
     args = parser.parse_args()

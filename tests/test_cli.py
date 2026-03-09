@@ -1,7 +1,6 @@
 """Tests for CLI argument parsing and entry point."""
 
-import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -9,7 +8,6 @@ import pytest
 class TestCLIParsing:
     def test_dry_run_flag(self):
         with patch("sys.argv", ["hermes-migrate", "--dry-run"]):
-            from hermes_migrate.cli import main
 
             # We can't run main() without OpenClaw dir, but we can test argparse
             import argparse

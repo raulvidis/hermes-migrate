@@ -1,10 +1,10 @@
 """Tests for sensitive data redaction and security."""
 
 from hermes_migrate.migrate import (
+    REDACT_VALUE,
+    MigrationLogger,
     is_sensitive_field,
     redact_sensitive_fields,
-    MigrationLogger,
-    REDACT_VALUE,
 )
 
 

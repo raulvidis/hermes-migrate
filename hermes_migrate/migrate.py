@@ -2,16 +2,15 @@
 Migration logic for OpenClaw to Hermes conversion.
 """
 
+import json
 import os
 import re
-import json
 import shutil
 import subprocess
-import sys
-from pathlib import Path
-from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 # Paths
 OPENCLAW_DIR = Path.home() / ".openclaw"
@@ -40,6 +39,12 @@ SAFE_FIELD_ALLOWLIST = {
     "total_tokens",
     "contextwindow",
     "context_window",
+    "tokencount",
+    "token_count",
+    "token_usage",
+    "tokenusage",
+    "tokensused",
+    "tokens_used",
 }
 
 # Sensitive values to redact in logs
@@ -73,7 +78,11 @@ class MigrationLogger:
             (r"(\d{10,}:[\w\-]+)", REDACT_VALUE),  # Telegram bot tokens
             (r"(AIza[\w\-]+)", REDACT_VALUE),  # Google API keys
             (r"(sk-[\w\-]+)", REDACT_VALUE),  # OpenAI keys
-            (r"(xox[baprs]-[\w\-]+)", REDACT_VALUE),  # Slack tokens
+            (r"(xox[baprs]-[\w\-]+)", REDACT_VALUE),  # Slack tokens (all types)
+            (r"(AKIA[\w]{16,})", REDACT_VALUE),  # AWS access keys
+            (r"(ghp_[\w]+)", REDACT_VALUE),  # GitHub personal tokens
+            (r"(gho_[\w]+)", REDACT_VALUE),  # GitHub OAuth tokens
+            (r"(sk-ant-[\w\-]+)", REDACT_VALUE),  # Anthropic API keys
         ]
         for pattern, replacement in patterns:
             msg = re.sub(pattern, replacement, msg, flags=re.IGNORECASE)
@@ -148,8 +157,9 @@ def redact_sensitive_fields(data: Dict[str, Any], path: str = "") -> Dict[str, A
 class HermesInstaller:
     """Handles Hermes installation and detection."""
 
-    HERMES_INSTALL_URL = (
-        "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
+    HERMES_INSTALL_URL = os.environ.get(
+        "HERMES_INSTALL_URL",
+        "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh",
     )
 
     def __init__(self, logger: MigrationLogger):
@@ -172,7 +182,7 @@ class HermesInstaller:
     def install_hermes(self) -> bool:
         """Install Hermes using the official installer."""
         self.logger.info("Hermes not found. Starting installation...")
-        self.logger.info(f"Using official installer from NousResearch/hermes-agent")
+        self.logger.info("Using official installer from NousResearch/hermes-agent")
 
         # Use the official installer
         try:
@@ -259,7 +269,7 @@ class OpenClawMigrator:
 
         backup_dir.mkdir(parents=True, exist_ok=True)
 
-        for f in ["config.yaml", "SOUL.md"]:
+        for f in ["config.yaml", "SOUL.md", ".env"]:
             src = HERMES_DIR / f
             if src.exists():
                 shutil.copy2(src, backup_dir / f)
@@ -278,8 +288,16 @@ class OpenClawMigrator:
             self.logger.error(f"OpenClaw config not found: {config_path}")
             return None
 
-        with open(config_path) as f:
-            config = json.load(f)
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            self.logger.error(f"Invalid OpenClaw config at {config_path}: {e}")
+            return None
+
+        if not isinstance(config, dict):
+            self.logger.error(f"OpenClaw config is not a JSON object: {config_path}")
+            return None
 
         self.logger.debug(f"Loaded OpenClaw config with keys: {list(config.keys())}")
         return config
@@ -366,7 +384,7 @@ class OpenClawMigrator:
         with open(path, encoding="utf-8") as f:
             for line in f:
                 # Detect indented lines = nested YAML we can't parse
-                if line and not line[0] in (" ", "\t", "#", "\n", "\r"):
+                if line and line[0] not in (" ", "\t", "#", "\n", "\r"):
                     stripped = line.strip()
                     if not stripped or stripped.startswith("#"):
                         continue
@@ -518,6 +536,11 @@ class OpenClawMigrator:
                 print(f"  Please enter a number between 1 and {len(agents)}")
             except (ValueError, KeyboardInterrupt):
                 print("\n  Cancelled.")
+                return None
+            except EOFError:
+                self.logger.error(
+                    "No TTY available. Use --agent <id> to specify which agent to migrate."
+                )
                 return None
 
     def migrate_soul(self) -> MigrationResult:
@@ -694,13 +717,11 @@ Agent: {self.agent_id or 'default'}
                 hermes_config["platform_toolsets"][ch] = [channel_map[ch]]
 
         result.items_migrated = enabled_channels
-        result.warnings.append(
-            "You'll need to re-authenticate with each channel (tokens not migrated)"
-        )
+        result.warnings.append("Verify channel tokens were migrated correctly to ~/.hermes/.env")
         self.logger.success(
             f"Enabled {len(enabled_channels)} channel toolsets for agent '{self.agent_id}'"
         )
-        self.logger.warn("NOTE: Re-authenticate with channels (tokens not migrated)")
+        self.logger.warn("NOTE: Verify channel tokens in ~/.hermes/.env after migration")
 
         result.success = True
         return result
@@ -854,12 +875,12 @@ Agent: {self.agent_id or 'default'}
         """Generate .env.openclaw with credential placeholders for detected services."""
         result = MigrationResult(success=False, message="Environment template")
         lines = [
-            f"# OpenClaw Migration - Credential Placeholders",
+            "# OpenClaw Migration - Credential Placeholders",
             f"# Generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
             f"# Agent: {self.agent_id or 'default'}",
-            f"#",
-            f"# Fill in values below then copy relevant lines to ~/.hermes/.env",
-            f"# Lines are commented out to prevent accidental sourcing",
+            "#",
+            "# Fill in values below then copy relevant lines to ~/.hermes/.env",
+            "# Lines are commented out to prevent accidental sourcing",
             "",
         ]
 
@@ -959,7 +980,7 @@ Agent: {self.agent_id or 'default'}
         else:
             with open(dst, "w", encoding="utf-8") as f:
                 f.write(env_content)
-            self.logger.success(f"Created credential template: .env.openclaw")
+            self.logger.success("Created credential template: .env.openclaw")
 
         result.success = True
         result.items_migrated = items
@@ -1078,7 +1099,7 @@ Agent: {self.agent_id or 'default'}
         mem_api_key = mem_search.get("remote", {}).get("apiKey")
         if mem_api_key:
             provider_name = mem_search.get("provider", "embedding").upper()
-            env_lines.append(f"# Memory search / embedding provider")
+            env_lines.append("# Memory search / embedding provider")
             env_lines.append(f"{provider_name}_API_KEY={mem_api_key}")
             items.append(f"{provider_name} API key (memory search)")
             env_lines.append("")
@@ -1086,7 +1107,7 @@ Agent: {self.agent_id or 'default'}
         # Gateway auth token
         gw_token = oc_config.get("gateway", {}).get("auth", {}).get("token")
         if gw_token:
-            env_lines.append(f"# Gateway auth (from OpenClaw)")
+            env_lines.append("# Gateway auth (from OpenClaw)")
             env_lines.append(f"GATEWAY_AUTH_TOKEN={gw_token}")
             items.append("Gateway auth token")
             env_lines.append("")
@@ -1128,7 +1149,10 @@ Agent: {self.agent_id or 'default'}
             try:
                 os.chmod(dst, 0o600)
             except OSError:
-                pass  # Windows doesn't support Unix permissions
+                result.warnings.append(
+                    "Could not set .env file permissions to 600 (Windows). "
+                    "Ensure the file is not world-readable."
+                )
 
             self.logger.success(f"Wrote {len(items)} credentials to .env")
 
@@ -1157,7 +1181,8 @@ Agent: {self.agent_id or 'default'}
                 return result
         except (FileNotFoundError, subprocess.TimeoutExpired):
             result.warnings.append(
-                "Hermes CLI not found. Start manually after sourcing shell: source ~/.bashrc && hermes"
+                "Hermes CLI not found. Start manually after sourcing shell: "
+                "source ~/.bashrc && hermes"
             )
             result.success = True
             return result
@@ -1235,6 +1260,8 @@ Agent: {self.agent_id or 'default'}
                 result.items_migrated.append(f"context pruning (ttl: {ttl})")
 
         # maxConcurrent → code_execution.max_tool_calls
+        # OpenClaw maxConcurrent is parallel agent count; Hermes max_tool_calls is
+        # total tool calls per turn. Multiply by 10 (typical tools per concurrent agent).
         max_concurrent = defaults.get("maxConcurrent")
         if max_concurrent:
             hermes_config.setdefault("code_execution", {})
@@ -1242,6 +1269,8 @@ Agent: {self.agent_id or 'default'}
             result.items_migrated.append(f"code_execution.max_tool_calls={max_concurrent * 10}")
 
         # subagents.maxConcurrent → delegation.max_iterations
+        # OpenClaw subagent concurrency maps to Hermes delegation iterations.
+        # Multiply by 6 (typical iterations per concurrent subagent).
         sub_max = defaults.get("subagents", {}).get("maxConcurrent")
         if sub_max:
             hermes_config.setdefault("delegation", {})
@@ -1339,7 +1368,7 @@ Credentials have been redacted - see .env.openclaw for placeholder list.
 
                         groups = acct_config.get("groups", {})
                         if groups:
-                            doc += f"- Groups:\n"
+                            doc += "- Groups:\n"
                             for gid, gconfig in groups.items():
                                 doc += f"  - `{gid}`: enabled={gconfig.get('enabled', True)}"
                                 doc += f", requireMention={gconfig.get('requireMention', True)}"
@@ -1348,8 +1377,10 @@ Credentials have been redacted - see .env.openclaw for placeholder list.
                                 topics = gconfig.get("topics", {})
                                 if topics:
                                     for tid, tconfig in topics.items():
-                                        doc += f"    - Topic `{tid}`: enabled={tconfig.get('enabled', True)}"
-                                        doc += f", requireMention={tconfig.get('requireMention', True)}"
+                                        enabled = tconfig.get("enabled", True)
+                                        mention = tconfig.get("requireMention", True)
+                                        doc += f"    - Topic `{tid}`: enabled={enabled}"
+                                        doc += f", requireMention={mention}"
                                         doc += f", policy={tconfig.get('groupPolicy', 'default')}\n"
                         doc += "\n"
 
@@ -1443,7 +1474,9 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
                     doc += "- Models:\n"
                     for m in models:
                         doc += f"  - `{m.get('id', '?')}` ({m.get('name', '?')})"
-                        doc += f" - context: {m.get('contextWindow', '?')}, max tokens: {m.get('maxTokens', '?')}"
+                        ctx = m.get("contextWindow", "?")
+                        maxtok = m.get("maxTokens", "?")
+                        doc += f" - context: {ctx}, max tokens: {maxtok}"
                         if m.get("reasoning"):
                             doc += " [reasoning]"
                         doc += "\n"
@@ -1601,17 +1634,26 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
 
         # Find and kill openclaw processes
         try:
-            # Find PIDs of openclaw processes
+            # Find PIDs of openclaw processes (match the binary name, not just any file path)
             ps_result = subprocess.run(
-                ["pgrep", "-f", "openclaw"], capture_output=True, text=True, timeout=5
+                ["pgrep", "-x", "openclaw"], capture_output=True, text=True, timeout=5
             )
+            if ps_result.returncode != 0:
+                # Fallback: match process command line but exclude this migration tool
+                ps_result = subprocess.run(
+                    ["pgrep", "-f", "openclaw.*(serve|start|gateway)"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
             if ps_result.returncode == 0:
                 pids = ps_result.stdout.strip().split("\n")
                 pids = [p.strip() for p in pids if p.strip()]
 
-                # Filter out our own migration process
+                # Filter out our own migration process and parent shell
                 our_pid = str(os.getpid())
-                pids = [p for p in pids if p != our_pid]
+                parent_pid = str(os.getppid())
+                pids = [p for p in pids if p not in (our_pid, parent_pid)]
 
                 if pids:
                     # SIGTERM first (graceful)
@@ -1692,7 +1734,8 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
         installer = HermesInstaller(self.logger)
         if not installer.ensure_hermes_installed(auto_install=True):
             self.logger.error(
-                "Hermes installation required. Run: curl -fsSL https://raw.githubusercontent.com/nousresearch/hermes/main/install.sh | bash"
+                "Hermes installation required. Run: curl -fsSL "
+                "https://raw.githubusercontent.com/nousresearch/hermes/main/install.sh | bash"
             )
             return False
 
@@ -1761,7 +1804,7 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
 
         for result in self.results:
             if result.items_migrated:
-                icon = "" if result.success else ""
+                icon = "[OK]" if result.success else "[!!]"
                 items = ", ".join(result.items_migrated)
                 print(f"    {icon} {result.message}: {items}")
 
