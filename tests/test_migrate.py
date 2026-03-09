@@ -577,6 +577,84 @@ class TestStopOpenClaw:
         assert result.success is True
         assert any("port" in w.lower() for w in result.warnings)
 
+    def test_kills_gateway_process_alongside_main(self, sample_openclaw_config):
+        """Both 'openclaw' (main) and 'openclaw-gateway' must be killed.
+
+        Regression test: previously pgrep -x openclaw found only the main process
+        and the gateway daemon was left running because the fallback was never reached.
+        """
+        migrator = OpenClawMigrator(dry_run=False, agent_id="test")
+
+        main_pid = "1001"
+        gateway_pid = "1002"
+
+        def fake_pgrep(cmd, **kwargs):
+            result = MagicMock()
+            # pgrep -x openclaw -> main process
+            if cmd == ["pgrep", "-x", "openclaw"]:
+                result.returncode = 0
+                result.stdout = f"{main_pid}\n"
+            # pgrep -x openclaw-gateway -> gateway process
+            elif cmd == ["pgrep", "-x", "openclaw-gateway"]:
+                result.returncode = 0
+                result.stdout = f"{gateway_pid}\n"
+            else:
+                result.returncode = 1
+                result.stdout = ""
+            return result
+
+        killed_pids = []
+
+        def fake_kill(pid, sig):
+            killed_pids.append((pid, sig))
+
+        import time
+
+        with (
+            patch("subprocess.run", side_effect=fake_pgrep),
+            patch("os.kill", side_effect=fake_kill),
+            patch("time.sleep"),
+        ):
+            result = migrator.stop_openclaw(sample_openclaw_config)
+
+        assert result.success is True
+        killed_main_pids = [pid for pid, _sig in killed_pids]
+        assert int(main_pid) in killed_main_pids, "main openclaw process was not killed"
+        assert int(gateway_pid) in killed_main_pids, "openclaw-gateway process was not killed"
+
+    def test_gateway_only_process_is_killed(self, sample_openclaw_config):
+        """openclaw-gateway is killed even when the main process is absent."""
+        migrator = OpenClawMigrator(dry_run=False, agent_id="test")
+
+        gateway_pid = "2002"
+
+        def fake_pgrep(cmd, **kwargs):
+            result = MagicMock()
+            if cmd == ["pgrep", "-x", "openclaw"]:
+                result.returncode = 1
+                result.stdout = ""
+            elif cmd == ["pgrep", "-x", "openclaw-gateway"]:
+                result.returncode = 0
+                result.stdout = f"{gateway_pid}\n"
+            else:
+                result.returncode = 1
+                result.stdout = ""
+            return result
+
+        killed_pids = []
+
+        with (
+            patch("subprocess.run", side_effect=fake_pgrep),
+            patch("os.kill", side_effect=lambda pid, sig: killed_pids.append((pid, sig))),
+            patch("time.sleep"),
+        ):
+            result = migrator.stop_openclaw(sample_openclaw_config)
+
+        assert result.success is True
+        assert int(gateway_pid) in [pid for pid, _ in killed_pids], (
+            "openclaw-gateway was not killed when it was the only openclaw process"
+        )
+
 
 class TestMigrateCredentials:
     def test_extracts_telegram_token_for_agent(self, tmp_path, sample_openclaw_config):

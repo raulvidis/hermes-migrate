@@ -1939,22 +1939,49 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
 
         # Find and kill openclaw processes
         try:
-            # Find PIDs of openclaw processes (match the binary name, not just any file path)
-            ps_result = subprocess.run(
-                ["pgrep", "-x", "openclaw"], capture_output=True, text=True, timeout=5
-            )
-            if ps_result.returncode != 0:
-                # Fallback: match process command line but exclude this migration tool
-                ps_result = subprocess.run(
+            # Collect PIDs for all openclaw-related processes.
+            # Strategy 1: exact binary name matches — covers both 'openclaw' (main)
+            # and 'openclaw-gateway' (gateway daemon).  We must check both separately
+            # because pgrep -x requires an exact name and won't match 'openclaw-gateway'
+            # when searching for 'openclaw'.
+            all_pids_raw: List[str] = []
+            for binary_name in ("openclaw", "openclaw-gateway"):
+                r = subprocess.run(
+                    ["pgrep", "-x", binary_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if r.returncode == 0:
+                    all_pids_raw.extend(r.stdout.strip().split("\n"))
+
+            # Strategy 2: fallback command-line pattern — used only when the exact-name
+            # searches found nothing (e.g. non-standard process names or future renames).
+            if not all_pids_raw:
+                r = subprocess.run(
                     ["pgrep", "-f", "openclaw.*(serve|start|gateway)"],
                     capture_output=True,
                     text=True,
                     timeout=5,
                 )
-            if ps_result.returncode == 0:
-                pids = ps_result.stdout.strip().split("\n")
-                pids = [p.strip() for p in pids if p.strip()]
+                if r.returncode == 0:
+                    all_pids_raw.extend(r.stdout.strip().split("\n"))
 
+            # Deduplicate while preserving order
+            seen: set = set()
+            deduped: List[str] = []
+            for p in all_pids_raw:
+                p = p.strip()
+                if p and p not in seen:
+                    seen.add(p)
+                    deduped.append(p)
+
+            if deduped:
+                pids = deduped
+            else:
+                pids = []
+
+            if pids:
                 # Filter out our own migration process and parent shell
                 our_pid = str(os.getpid())
                 parent_pid = str(os.getppid())
