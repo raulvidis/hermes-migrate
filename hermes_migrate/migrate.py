@@ -56,8 +56,17 @@ GRACEFUL_SHUTDOWN_WAIT = 2
 
 # Providers known to be supported by Hermes
 HERMES_SUPPORTED_PROVIDERS = {
-    "openai", "openrouter", "nous", "nousportal", "nous_portal",
-    "z.ai", "zai", "glm", "kimi", "moonshot", "minimax",
+    "openai",
+    "openrouter",
+    "nous",
+    "nousportal",
+    "nous_portal",
+    "z.ai",
+    "zai",
+    "glm",
+    "kimi",
+    "moonshot",
+    "minimax",
 }
 
 # Model name prefixes that indicate an unsupported provider
@@ -903,7 +912,9 @@ Agent: {self.agent_id or 'default'}
                     f"Provider '{name}' may not be supported by Hermes - manual config needed"
                 )
             else:
-                result.warnings.append(f"Custom provider '{name}' noted - manual config may be needed")
+                result.warnings.append(
+                    f"Custom provider '{name}' noted - manual config may be needed"
+                )
 
         result.success = bool(result.items_migrated)
         return result
