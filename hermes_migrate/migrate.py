@@ -1393,6 +1393,7 @@ Agent: {self.agent_id or 'default'}
         try:
             self.logger.info("Starting Hermes...")
             popen_kwargs: Dict[str, Any] = {
+                "stdin": subprocess.DEVNULL,
                 "stdout": subprocess.DEVNULL,
                 "stderr": subprocess.DEVNULL,
             }
