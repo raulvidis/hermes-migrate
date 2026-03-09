@@ -1734,8 +1734,8 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
         installer = HermesInstaller(self.logger)
         if not installer.ensure_hermes_installed(auto_install=True):
             self.logger.error(
-                "Hermes installation required. Run: curl -fsSL "
-                "https://raw.githubusercontent.com/nousresearch/hermes/main/install.sh | bash"
+                "Hermes installation required. Run: curl -fsSL https://raw.githubusercontent.com"
+                "/NousResearch/hermes-agent/main/scripts/install.sh | bash"
             )
             return False
 
