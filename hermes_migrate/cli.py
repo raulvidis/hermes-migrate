@@ -10,6 +10,41 @@ from pathlib import Path
 from .migrate import OpenClawMigrator, HermesInstaller, MigrationLogger, HERMES_DIR, OPENCLAW_DIR
 
 
+def _uninstall():
+    """Remove hermes-migrate: symlink, repo clone, and pip package."""
+    import shutil
+    import subprocess
+
+    removed = []
+
+    # Remove ~/.local/bin symlink
+    symlink = Path.home() / ".local" / "bin" / "hermes-migrate"
+    if symlink.is_symlink() or symlink.exists():
+        symlink.unlink()
+        removed.append(str(symlink))
+
+    # Remove the git clone (repo directory)
+    # The wrapper script or __file__ tells us where the repo is
+    repo_dir = Path(__file__).resolve().parent.parent
+    if (repo_dir / ".git").exists() and (repo_dir / "hermes_migrate").is_dir():
+        shutil.rmtree(repo_dir, ignore_errors=True)
+        removed.append(str(repo_dir))
+
+    # Try pip uninstall (for pip-installed users)
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "hermes-migrate", "-y"],
+            capture_output=True, timeout=30,
+        )
+        removed.append("pip package")
+    except Exception:
+        pass
+
+    if removed:
+        print(f"\n  Cleaned up: {', '.join(removed)}")
+    print("  hermes-migrate has been removed. Your Hermes installation is untouched.\n")
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -97,8 +132,23 @@ For more info: https://github.com/raulvidis/hermes-migrate
     
     if args.dry_run:
         print("\n  [DRY RUN] No files were modified.\n")
-    
-    sys.exit(0 if success else 1)
+        sys.exit(0)
+
+    if not success:
+        sys.exit(1)
+
+    # Offer to uninstall hermes-migrate after successful migration
+    print("")
+    try:
+        answer = input("  Migration complete. Uninstall hermes-migrate and clean up? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = ""
+        print("")
+
+    if answer in ("y", "yes"):
+        _uninstall()
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":
