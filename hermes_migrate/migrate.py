@@ -204,9 +204,13 @@ class HermesInstaller:
             cmd = f"curl -fsSL {self.HERMES_INSTALL_URL} | bash"
         else:
             self.logger.info("Installing Hermes (skipping setup wizard)...")
-            # Feed /dev/null to stdin so the installer runs but the
+            # Download script first, then run with /dev/null on stdin so the
             # interactive setup wizard (TUI) gets EOF and exits immediately.
-            cmd = f"curl -fsSL {self.HERMES_INSTALL_URL} | bash < /dev/null"
+            # Two-step avoids curl's stdin being affected by the redirect.
+            cmd = (
+                f"tmpf=$(mktemp) && curl -fsSL {self.HERMES_INSTALL_URL} -o $tmpf"
+                f" && bash $tmpf < /dev/null; rm -f $tmpf"
+            )
 
         try:
             returncode = subprocess.call(cmd, shell=True, timeout=600)
