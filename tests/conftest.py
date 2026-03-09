@@ -32,7 +32,7 @@ def sample_openclaw_config():
             "defaults": {
                 "model": {
                     "primary": "anthropic/claude-sonnet-4-20250514",
-                    "fallbacks": ["openai/gpt-4o"]
+                    "fallbacks": ["openai/gpt-4o"],
                 },
                 "workspace": "default",
                 "compaction": {"mode": "safeguard"},
@@ -43,52 +43,38 @@ def sample_openclaw_config():
                 "memorySearch": {
                     "provider": "gemini",
                     "model": "gemini-embedding-001",
-                    "remote": {"apiKey": "fake-gemini-key"}
-                }
+                    "remote": {"apiKey": "fake-gemini-key"},
+                },
             },
             "list": [
-                {
-                    "id": "nora",
-                    "model": "openai/gpt-5",
-                    "workspace": "default"
-                },
-                {
-                    "id": "cleo",
-                    "model": "anthropic/claude-haiku-4-5",
-                    "workspace": "default"
-                },
-                {
-                    "id": "hank",
-                    "model": "zai/glm-5",
-                    "workspace": "default"
-                }
-            ]
+                {"id": "nora", "model": "openai/gpt-5", "workspace": "default"},
+                {"id": "cleo", "model": "anthropic/claude-haiku-4-5", "workspace": "default"},
+                {"id": "hank", "model": "zai/glm-5", "workspace": "default"},
+            ],
         },
         "channels": {
             "telegram": {
                 "enabled": True,
                 "accounts": {
                     "cleo": {"botToken": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"},
-                    "hank": {"botToken": "987654321:ZYXwvuTSRqpoNMLkjiHGFedcba"}
-                }
+                    "hank": {"botToken": "987654321:ZYXwvuTSRqpoNMLkjiHGFedcba"},
+                },
             },
             "slack": {
                 "enabled": True,
-                "accounts": {
-                    "nora": {"accessToken": "xoxb-fake-slack-token-12345"}
-                }
-            }
+                "accounts": {"nora": {"accessToken": "xoxb-fake-slack-token-12345"}},
+            },
         },
         "bindings": [
             {"agentId": "cleo", "match": {"channel": "telegram", "accountId": "cleo"}},
             {"agentId": "hank", "match": {"channel": "telegram", "accountId": "hank"}},
-            {"agentId": "nora", "match": {"channel": "slack", "accountId": "nora"}}
+            {"agentId": "nora", "match": {"channel": "slack", "accountId": "nora"}},
         ],
         "models": {
             "providers": {
                 "custom-llm": {
                     "api": "openai-compatible",
-                    "baseUrl": "https://my-llm.example.com/v1"
+                    "baseUrl": "https://my-llm.example.com/v1",
                 }
             }
         },
@@ -96,12 +82,15 @@ def sample_openclaw_config():
             "enabled": True,
             "backend": "docker",
             "defaultAgent": "nora",
-            "allowedAgents": ["nora", "cleo"]
+            "allowedAgents": ["nora", "cleo"],
         },
         "tools": {
-            "web": {"search": {"enabled": True, "apiKey": "fake-search-key"}, "fetch": {"enabled": True}},
+            "web": {
+                "search": {"enabled": True, "apiKey": "fake-search-key"},
+                "fetch": {"enabled": True},
+            },
             "agentToAgent": {"enabled": True},
-            "sessions": {"visibility": "all"}
+            "sessions": {"visibility": "all"},
         },
         "gateway": {
             "port": 18789,
@@ -109,7 +98,7 @@ def sample_openclaw_config():
             "bind": "loopback",
             "auth": {"mode": "token", "token": "fake-gateway-token"},
             "tailscale": {"mode": "off"},
-            "nodes": {"denyCommands": ["camera.snap", "screen.record"]}
+            "nodes": {"denyCommands": ["camera.snap", "screen.record"]},
         },
         "hooks": {
             "internal": {
@@ -117,14 +106,14 @@ def sample_openclaw_config():
                 "entries": {
                     "boot-md": {"enabled": True},
                     "session-memory": {"enabled": True},
-                    "command-logger": {"enabled": False}
-                }
+                    "command-logger": {"enabled": False},
+                },
             }
         },
         "plugins": {
             "entries": {
                 "telegram": {"enabled": True},
-                "acpx": {"enabled": True, "config": {"permissionMode": "approve-all"}}
+                "acpx": {"enabled": True, "config": {"permissionMode": "approve-all"}},
             }
         },
         "cron": {"sessionRetention": "1h"},
@@ -133,12 +122,12 @@ def sample_openclaw_config():
             "nativeSkills": "auto",
             "restart": True,
             "ownerDisplay": "raw",
-            "allowFrom": {"telegram": ["5594479851"]}
+            "allowFrom": {"telegram": ["5594479851"]},
         },
         "session": {"dmScope": "per-channel-peer", "maintenance": {"mode": "enforce"}},
         "messages": {"ackReactionScope": "group-mentions"},
         "skills": {"install": {"nodeManager": "pnpm"}},
-        "update": {"channel": "stable", "auto": {"enabled": True}}
+        "update": {"channel": "stable", "auto": {"enabled": True}},
     }
 
 
@@ -148,14 +137,12 @@ def single_agent_config():
     return {
         "agents": {
             "defaults": {
-                "model": {
-                    "primary": "anthropic/claude-sonnet-4-20250514"
-                },
-                "workspace": "default"
+                "model": {"primary": "anthropic/claude-sonnet-4-20250514"},
+                "workspace": "default",
             }
         },
         "channels": {},
-        "bindings": []
+        "bindings": [],
     }
 
 

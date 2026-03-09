@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(xargs:*)",
+      "Bash(grep:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
+      "Bash(python3:*)",
+      "Bash(gh repo:*)",
+      "Bash(\"/c/Program Files/GitHub CLI/gh.exe\" --version)",
+      "Read(//c/Program Files/**)",
+      "Bash(where gh:*)",
+      "Bash(rm:*)",
+      "Bash(twine upload:*)",
+      "Bash(xxd:*)",
+      "Bash(mv:*)",
+      "Bash(pytest:*)",
+      "Bash(gh run:*)",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

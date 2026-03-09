@@ -706,9 +706,11 @@ class TestStartHermes:
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         mock_version = MagicMock()
         mock_version.returncode = 0
+        # fmt: off
         with patch("subprocess.run", return_value=mock_version), \
              patch("subprocess.Popen") as mock_popen:
             result = migrator.start_hermes()
+        # fmt: on
         assert result.success is True
         assert "Hermes started" in result.items_migrated
         mock_popen.assert_called_once()
@@ -717,9 +719,11 @@ class TestStartHermes:
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         mock_version = MagicMock()
         mock_version.returncode = 0
+        # fmt: off
         with patch("subprocess.run", return_value=mock_version), \
              patch("subprocess.Popen", side_effect=OSError("permission denied")):
             result = migrator.start_hermes()
+        # fmt: on
         assert result.success is True
         assert any("permission denied" in w.lower() for w in result.warnings)
 

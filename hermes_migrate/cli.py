@@ -34,7 +34,8 @@ def _uninstall():
     try:
         subprocess.run(
             [sys.executable, "-m", "pip", "uninstall", "hermes-migrate", "-y"],
-            capture_output=True, timeout=30,
+            capture_output=True,
+            timeout=30,
         )
         removed.append("pip package")
     except Exception:
@@ -62,25 +63,27 @@ Examples:
 For more info: https://github.com/raulvidis/hermes-migrate
         """,
     )
-    
+
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Preview changes without writing files",
     )
-    
+
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable verbose output",
     )
-    
+
     parser.add_argument(
-        "-a", "--agent",
+        "-a",
+        "--agent",
         dest="agent_id",
         help="Specify agent to migrate (skips prompt)",
     )
-    
+
     parser.add_argument(
         "--no-install",
         action="store_true",
@@ -92,21 +95,21 @@ For more info: https://github.com/raulvidis/hermes-migrate
         action="store_true",
         help="Don't start Hermes after migration",
     )
-    
+
     parser.add_argument(
         "--version",
         action="version",
         version="%(prog)s 1.0.0",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Check for OpenClaw installation
     if not OPENCLAW_DIR.exists():
         print(f"\n  Error: OpenClaw directory not found at {OPENCLAW_DIR}")
         print("  Make sure OpenClaw is installed and configured.\n")
         sys.exit(1)
-    
+
     # Check/install Hermes
     logger = MigrationLogger(args.verbose)
     installer = HermesInstaller(logger)
@@ -129,7 +132,7 @@ For more info: https://github.com/raulvidis/hermes-migrate
         auto_start=not args.no_start,
     )
     success = migrator.run()
-    
+
     if args.dry_run:
         print("\n  [DRY RUN] No files were modified.\n")
         sys.exit(0)
@@ -140,7 +143,11 @@ For more info: https://github.com/raulvidis/hermes-migrate
     # Offer to uninstall hermes-migrate after successful migration
     print("")
     try:
-        answer = input("  Migration complete. Uninstall hermes-migrate and clean up? [y/N] ").strip().lower()
+        answer = (
+            input("  Migration complete. Uninstall hermes-migrate and clean up? [y/N] ")
+            .strip()
+            .lower()
+        )
     except (EOFError, KeyboardInterrupt):
         answer = ""
         print("")

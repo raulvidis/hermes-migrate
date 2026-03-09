@@ -58,11 +58,7 @@ class TestRedactSensitiveFields:
 
     def test_redacts_nested(self):
         data = {
-            "channel": {
-                "name": "telegram",
-                "botToken": "123:ABC",
-                "settings": {"apiKey": "sk-123"}
-            }
+            "channel": {"name": "telegram", "botToken": "123:ABC", "settings": {"apiKey": "sk-123"}}
         }
         result = redact_sensitive_fields(data)
         assert result["channel"]["name"] == "telegram"
