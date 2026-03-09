@@ -186,14 +186,14 @@ class TestMigrateModels:
         hermes_config = {}
         result = migrator.migrate_models(sample_openclaw_config, hermes_config)
         assert result.success is True
-        assert hermes_config["model"]["default"] == "anthropic/claude-haiku-4-5"
+        assert hermes_config["model"]["default"] == "claude-haiku-4-5"
 
     def test_fallback_to_defaults(self, single_agent_config):
         migrator = OpenClawMigrator(dry_run=True, agent_id="main")
         hermes_config = {}
         result = migrator.migrate_models(single_agent_config, hermes_config)
         assert result.success is True
-        assert hermes_config["model"]["default"] == "anthropic/claude-sonnet-4-20250514"
+        assert hermes_config["model"]["default"] == "claude-sonnet-4-20250514"
 
     def test_custom_provider_warning(self, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=True, agent_id="cleo")
@@ -661,14 +661,6 @@ class TestMigrateCredentials:
         assert any("GEMINI" in item for item in result.items_migrated)
         env_content = (tmp_path / ".env").read_text(encoding="utf-8")
         assert "GEMINI_API_KEY=fake-gemini-key" in env_content
-
-    def test_extracts_gateway_auth_token(self, tmp_path, sample_openclaw_config):
-        migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
-            result = migrator.migrate_credentials(sample_openclaw_config)
-        assert "Gateway auth token" in result.items_migrated
-        env_content = (tmp_path / ".env").read_text(encoding="utf-8")
-        assert "GATEWAY_AUTH_TOKEN=fake-gateway-token" in env_content
 
 
 class TestStartHermes:

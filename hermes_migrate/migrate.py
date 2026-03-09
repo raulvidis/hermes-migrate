@@ -897,16 +897,14 @@ Agent: {self.agent_id or 'default'}
             if "model" not in hermes_config or not isinstance(hermes_config["model"], dict):
                 hermes_config["model"] = {}
 
-            hermes_config["model"]["default"] = primary
+            # Strip provider prefix from model name (e.g. zai/glm-5 -> glm-5).
+            # Hermes routes to providers via env vars (ZAI_API_KEY, etc.),
+            # so only the bare model name is needed in config.yaml.
+            if "/" in primary:
+                primary = primary.split("/", 1)[1]
+                self.logger.debug(f"Stripped provider prefix: {primary}")
 
-            # If model uses a custom provider, set base_url from provider config
-            providers = oc_config.get("models", {}).get("providers", {})
-            model_prefix = primary.split("/")[0] if "/" in primary else ""
-            if model_prefix and model_prefix in providers:
-                base_url = providers[model_prefix].get("baseUrl", "")
-                if base_url:
-                    hermes_config["model"]["base_url"] = base_url
-                    self.logger.debug(f"Set model base_url: {base_url}")
+            hermes_config["model"]["default"] = primary
 
             # Filter fallbacks to only include supported providers
             if model_config.get("fallbacks"):
@@ -1272,14 +1270,6 @@ Agent: {self.agent_id or 'default'}
             env_lines.append("# Memory search / embedding provider")
             env_lines.append(f"{provider_name}_API_KEY={mem_api_key}")
             items.append(f"{provider_name} API key (memory search)")
-            env_lines.append("")
-
-        # Gateway auth token
-        gw_token = oc_config.get("gateway", {}).get("auth", {}).get("token")
-        if gw_token:
-            env_lines.append("# Gateway auth (from OpenClaw)")
-            env_lines.append(f"GATEWAY_AUTH_TOKEN={gw_token}")
-            items.append("Gateway auth token")
             env_lines.append("")
 
         # Load auth profiles for API keys stored outside openclaw.json
