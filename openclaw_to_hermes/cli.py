@@ -23,7 +23,7 @@ Examples:
   openclaw-to-hermes --dry-run    Preview changes without writing
   openclaw-to-hermes -v           Verbose output
 
-For more info: https://github.com/nousresearch/openclaw-to-hermes
+For more info: https://github.com/raulvidis/openclaw-to-hermes
         """,
     )
     

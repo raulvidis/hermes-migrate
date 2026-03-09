@@ -21,7 +21,6 @@ classifiers = [
 ]
 dependencies = [
     "pyyaml>=6.0",
-    "rich>=13.0",
 ]
 
 [project.optional-dependencies]
@@ -35,9 +34,9 @@ dev = [
 openclaw-to-hermes = "openclaw_to_hermes.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/nousresearch/openclaw-to-hermes"
-Repository = "https://github.com/nousresearch/openclaw-to-hermes"
-Issues = "https://github.com/nousresearch/openclaw-to-hermes/issues"
+Homepage = "https://github.com/raulvidis/openclaw-to-hermes"
+Repository = "https://github.com/raulvidis/openclaw-to-hermes"
+Issues = "https://github.com/raulvidis/openclaw-to-hermes/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

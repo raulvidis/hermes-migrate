@@ -116,7 +116,7 @@ You'll need to re-authenticate with channels after migration.
 ## Development
 
 ```bash
-git clone https://github.com/nousresearch/openclaw-to-hermes
+git clone https://github.com/raulvidis/openclaw-to-hermes
 cd openclaw-to-hermes
 pip install -e ".[dev]"
 
