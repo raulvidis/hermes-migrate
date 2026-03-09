@@ -203,8 +203,10 @@ class HermesInstaller:
             self.logger.info("Installing Hermes (interactive setup)...\n")
             cmd = f"curl -fsSL {self.HERMES_INSTALL_URL} | bash"
         else:
-            self.logger.info("Installing Hermes (default settings)...")
-            cmd = f'yes "" | curl -fsSL {self.HERMES_INSTALL_URL} | bash'
+            self.logger.info("Installing Hermes (skipping setup wizard)...")
+            # Feed /dev/null to stdin so the installer runs but the
+            # interactive setup wizard (TUI) gets EOF and exits immediately.
+            cmd = f"curl -fsSL {self.HERMES_INSTALL_URL} | bash < /dev/null"
 
         try:
             returncode = subprocess.call(cmd, shell=True, timeout=600)
