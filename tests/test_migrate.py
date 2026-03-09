@@ -889,3 +889,94 @@ class TestQuietMode:
         logger.info("stored")
         assert len(logger.messages) == 1
         assert logger.messages[0] == ("INFO", "stored")
+
+
+class TestRollbackOnException:
+    def test_run_rolls_back_on_crash(
+        self, tmp_path, openclaw_with_files, sample_openclaw_config, monkeypatch
+    ):
+        import json
+
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", openclaw_with_files)
+        hermes_dir = tmp_path / ".hermes"
+        hermes_dir.mkdir()
+        (hermes_dir / "memories").mkdir()
+        (hermes_dir / "config.yaml").write_text("original: true\n")
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", hermes_dir)
+        config_path = openclaw_with_files / "openclaw.json"
+        config_path.write_text(json.dumps(sample_openclaw_config), encoding="utf-8")
+
+        migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
+        # Make migrate_channels crash
+        with (
+            patch.object(HermesInstaller, "ensure_hermes_installed", return_value=True),
+            patch.object(
+                OpenClawMigrator,
+                "migrate_channels",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
+            result = migrator.run()
+        assert result is False
+        # Original config should be restored
+        assert "original" in (hermes_dir / "config.yaml").read_text()
+
+
+class TestParseYamlValue:
+    def test_true(self):
+        assert OpenClawMigrator._parse_yaml_value("true") is True
+
+    def test_false(self):
+        assert OpenClawMigrator._parse_yaml_value("false") is False
+
+    def test_null(self):
+        assert OpenClawMigrator._parse_yaml_value("null") is None
+
+    def test_integer(self):
+        assert OpenClawMigrator._parse_yaml_value("42") == 42
+
+    def test_float(self):
+        assert OpenClawMigrator._parse_yaml_value("3.14") == 3.14
+
+    def test_quoted_string(self):
+        assert OpenClawMigrator._parse_yaml_value("'hello world'") == "hello world"
+
+    def test_double_quoted(self):
+        assert OpenClawMigrator._parse_yaml_value('"hello"') == "hello"
+
+    def test_plain_string(self):
+        assert OpenClawMigrator._parse_yaml_value("gpt-4") == "gpt-4"
+
+
+class TestSelectAgentNonInteractive:
+    def test_requires_agent_flag_without_tty(self, sample_openclaw_config):
+        migrator = OpenClawMigrator(dry_run=True)
+        with patch("sys.stdin") as mock_stdin:
+            mock_stdin.isatty.return_value = False
+            result = migrator.select_agent(sample_openclaw_config)
+        assert result is None
+
+
+class TestCleanupOldBackups:
+    def test_removes_oldest_backups(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_path)
+        for i in range(5):
+            (tmp_path / f"backup_2026030{i}_120000").mkdir()
+
+        migrator = OpenClawMigrator(dry_run=False, agent_id="test")
+        migrator._cleanup_old_backups(keep=3)
+
+        remaining = sorted(d.name for d in tmp_path.iterdir() if d.name.startswith("backup_"))
+        assert len(remaining) == 3
+        assert "backup_20260300_120000" not in remaining
+        assert "backup_20260301_120000" not in remaining
+
+    def test_keeps_all_if_under_limit(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_path)
+        (tmp_path / "backup_20260301_120000").mkdir()
+
+        migrator = OpenClawMigrator(dry_run=False, agent_id="test")
+        migrator._cleanup_old_backups(keep=3)
+
+        remaining = [d.name for d in tmp_path.iterdir() if d.name.startswith("backup_")]
+        assert len(remaining) == 1

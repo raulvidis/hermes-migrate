@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +51,9 @@ SAFE_FIELD_ALLOWLIST = {
 # Sensitive values to redact in logs
 REDACT_VALUE = "***REDACTED***"
 
+# Seconds to wait after SIGTERM before SIGKILL
+GRACEFUL_SHUTDOWN_WAIT = 2
+
 
 @dataclass
 class MigrationResult:
@@ -86,8 +90,8 @@ class MigrationLogger:
             (r"(sk-ant-[\w\-]+)", REDACT_VALUE),  # Anthropic API keys
             (r"(sk_live_[\w]+)", REDACT_VALUE),  # Stripe secret keys
             (r"(rk_live_[\w]+)", REDACT_VALUE),  # Stripe restricted keys
-            (r"(AC[a-f0-9]{32})", REDACT_VALUE),  # Twilio account SIDs
-            (r"(SK[a-f0-9]{32})", REDACT_VALUE),  # Twilio API keys
+            (r"(AC[a-fA-F0-9]{32})", REDACT_VALUE),  # Twilio account SIDs
+            (r"(SK[a-fA-F0-9]{32})", REDACT_VALUE),  # Twilio API keys
             (r"(Bearer\s+[\w\-.]+)", REDACT_VALUE),  # Bearer tokens in headers
         ]
         for pattern, replacement in patterns:
@@ -306,8 +310,6 @@ class OpenClawMigrator:
             dst = HERMES_DIR / f
             if backup_file.exists():
                 shutil.copy2(backup_file, dst)
-            elif dst.exists():
-                dst.unlink()
 
         backup_mem = self.backup_dir / "memories"
         hermes_mem = HERMES_DIR / "memories"
@@ -317,6 +319,23 @@ class OpenClawMigrator:
             shutil.copytree(backup_mem, hermes_mem)
 
         self.logger.success("Rolled back to pre-migration state")
+
+    def _cleanup_old_backups(self, keep: int = 3):
+        """Remove all but the N most recent backup_* directories in HERMES_DIR."""
+        if not HERMES_DIR.exists():
+            return
+        backups = sorted(
+            [d for d in HERMES_DIR.iterdir() if d.is_dir() and d.name.startswith("backup_")],
+            key=lambda d: d.name,
+        )
+        if len(backups) <= keep:
+            return
+        for old_backup in backups[:-keep]:
+            try:
+                shutil.rmtree(old_backup)
+                self.logger.debug(f"Removed old backup: {old_backup.name}")
+            except OSError as e:
+                self.logger.warn(f"Could not remove old backup {old_backup.name}: {e}")
 
     def _load_openclaw_config(self) -> Optional[Dict[str, Any]]:
         """Load OpenClaw configuration."""
@@ -575,6 +594,13 @@ class OpenClawMigrator:
 
         if not agents:
             self.logger.warn("No agents found in OpenClaw config")
+            return None
+
+        if len(agents) > 1 and not sys.stdin.isatty():
+            self.logger.error(
+                "Multiple agents found but no TTY available. "
+                "Use --agent <id> to specify which agent to migrate."
+            )
             return None
 
         if len(agents) == 1:
@@ -1746,7 +1772,7 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
                         # Wait briefly for graceful shutdown
                         import time
 
-                        time.sleep(2)
+                        time.sleep(GRACEFUL_SHUTDOWN_WAIT)
 
                         # Check if any are still running
                         still_running = []
@@ -1798,17 +1824,35 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
 
     def _check_previous_migration(self) -> bool:
         """Check if a previous migration exists. Returns True if safe to proceed."""
+        found_marker = False
+
         marker = HERMES_DIR / ".env"
         if marker.exists():
             content = marker.read_text(encoding="utf-8")
             if "OpenClaw Migration" in content:
-                self.logger.warn("Previous migration detected in ~/.hermes/.env")
-                self.logger.warn(
-                    "Re-running may create duplicate entries. "
-                    "Use --force to overwrite, or clean up manually."
-                )
-                if not self.force:
-                    return False
+                found_marker = True
+
+        soul = HERMES_DIR / "SOUL.md"
+        if soul.exists():
+            content = soul.read_text(encoding="utf-8")
+            if "Migrated from OpenClaw" in content:
+                found_marker = True
+
+        memories = HERMES_DIR / "memories"
+        if memories.exists() and memories.is_dir():
+            for child in memories.iterdir():
+                if child.name.startswith("openclaw_"):
+                    found_marker = True
+                    break
+
+        if found_marker:
+            self.logger.warn("Previous migration detected in ~/.hermes/")
+            self.logger.warn(
+                "Re-running may create duplicate entries. "
+                "Use --force to overwrite, or clean up manually."
+            )
+            if not self.force:
+                return False
         return True
 
     def run(self) -> bool:
@@ -1889,6 +1933,10 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
 
         # Print summary
         self._print_summary()
+
+        # Clean up old backups
+        if not self.dry_run:
+            self._cleanup_old_backups()
 
         # Start Hermes
         if self.auto_start:

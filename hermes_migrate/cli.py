@@ -131,7 +131,7 @@ For more info: https://github.com/raulvidis/hermes-migrate
         sys.exit(1)
 
     # Check/install Hermes
-    logger = MigrationLogger(args.verbose)
+    logger = MigrationLogger(verbose=args.verbose if not args.quiet else False, quiet=args.quiet)
     installer = HermesInstaller(logger)
 
     if not installer.is_hermes_installed() and not installer.is_hermes_dir_exists():

@@ -152,6 +152,13 @@ class TestMigrationLoggerRedaction:
         assert fake_sid not in result
         assert REDACT_VALUE in result
 
+    def test_redacts_twilio_sid_uppercase(self):
+        logger = MigrationLogger()
+        fake_sid = "AC" + "A1B2C3D4E5F6" * 2 + "A1B2C3D4"
+        result = logger._redact(f"Twilio {fake_sid}")
+        assert fake_sid not in result
+        assert REDACT_VALUE in result
+
     def test_redacts_bearer_token(self):
         logger = MigrationLogger()
         result = logger._redact("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test")
