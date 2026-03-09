@@ -48,7 +48,7 @@ For more info: https://github.com/nousresearch/openclaw-to-hermes
     parser.add_argument(
         "--install-hermes",
         action="store_true",
-        help="Install Hermes if not found",
+        help="Install Hermes if not found (uses official installer from NousResearch)",
     )
     
     parser.add_argument(

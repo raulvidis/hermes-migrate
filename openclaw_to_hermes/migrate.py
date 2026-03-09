@@ -131,6 +131,8 @@ def redact_sensitive_fields(data: Dict[str, Any], path: str = "") -> Dict[str, A
 class HermesInstaller:
     """Handles Hermes installation and detection."""
     
+    HERMES_INSTALL_URL = "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
+    
     def __init__(self, logger: MigrationLogger):
         self.logger = logger
     
@@ -154,71 +156,35 @@ class HermesInstaller:
     def install_hermes(self) -> bool:
         """Install Hermes using the official installer."""
         self.logger.info("Hermes not found. Starting installation...")
+        self.logger.info(f"Using official installer from NousResearch/hermes-agent")
         
-        # Try different installation methods
-        install_methods = [
-            self._install_via_pip,
-            self._install_via_pipx,
-            self._install_via_curl,
-        ]
-        
-        for method in install_methods:
-            try:
-                if method():
-                    self.logger.success("Hermes installed successfully!")
-                    return True
-            except Exception as e:
-                self.logger.debug(f"Install method failed: {e}")
-                continue
-        
-        self.logger.error("Failed to install Hermes automatically.")
-        self.logger.info("Please install Hermes manually:")
-        self.logger.info("  pip install hermes-agent")
-        self.logger.info("  OR")
-        self.logger.info("  curl -fsSL https://get.hermes.ai | sh")
-        return False
+        # Use the official installer
+        try:
+            self.logger.info("Running: curl -fsSL ... | bash")
+            result = subprocess.run(
+                f"curl -fsSL {self.HERMES_INSTALL_URL} | bash",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes
+            )
+            
+            if result.returncode == 0:
+                self.logger.success("Hermes installed successfully!")
+                self.logger.info("Run 'source ~/.bashrc' or restart your shell, then 'hermes setup'")
+                return True
+            else:
+                self.logger.error(f"Installation failed: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            self.logger.error("Installation timed out")
+            return False
+        except Exception as e:
+            self.logger.error(f"Installation error: {e}")
+            return False
     
-    def _install_via_pip(self) -> bool:
-        """Try installing via pip."""
-        self.logger.info("Trying pip install...")
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "hermes-agent"],
-            capture_output=True,
-            text=True,
-            timeout=120
-        )
-        if result.returncode == 0:
-            return self.is_hermes_installed()
-        return False
-    
-    def _install_via_pipx(self) -> bool:
-        """Try installing via pipx."""
-        self.logger.info("Trying pipx install...")
-        result = subprocess.run(
-            ["pipx", "install", "hermes-agent"],
-            capture_output=True,
-            text=True,
-            timeout=120
-        )
-        if result.returncode == 0:
-            return self.is_hermes_installed()
-        return False
-    
-    def _install_via_curl(self) -> bool:
-        """Try installing via curl installer."""
-        self.logger.info("Trying curl installer...")
-        result = subprocess.run(
-            ["curl", "-fsSL", "https://get.hermes.ai", "|", "sh"],
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=120
-        )
-        if result.returncode == 0:
-            return self.is_hermes_installed()
-        return False
-    
-    def ensure_hermes_installed(self) -> bool:
+    def ensure_hermes_installed(self, auto_install: bool = False) -> bool:
         """Ensure Hermes is installed, installing if necessary."""
         if self.is_hermes_installed():
             self.logger.success("Hermes is installed")
@@ -226,10 +192,14 @@ class HermesInstaller:
         
         if self.is_hermes_dir_exists():
             self.logger.info("Hermes directory exists but CLI not in PATH")
+            self.logger.info("Run 'source ~/.bashrc' or restart your shell")
             # Still proceed - migration can work without CLI
             return True
         
-        return self.install_hermes()
+        if auto_install:
+            return self.install_hermes()
+        
+        return False
 
 
 class OpenClawMigrator:
