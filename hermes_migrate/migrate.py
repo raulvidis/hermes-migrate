@@ -54,6 +54,23 @@ REDACT_VALUE = "***REDACTED***"
 # Seconds to wait after SIGTERM before SIGKILL
 GRACEFUL_SHUTDOWN_WAIT = 2
 
+# Providers known to be supported by Hermes
+HERMES_SUPPORTED_PROVIDERS = {
+    "openai", "openrouter", "nous", "nousportal", "nous_portal",
+    "z.ai", "zai", "glm", "kimi", "moonshot", "minimax",
+}
+
+# Model name prefixes that indicate an unsupported provider
+UNSUPPORTED_MODEL_PREFIXES = {
+    "claude": "Anthropic",
+    "anthropic": "Anthropic",
+    "gemini": "Google",
+    "palm": "Google",
+    "command": "Cohere",
+    "mistral": "Mistral (use via OpenRouter)",
+    "llama": "Meta (use via OpenRouter)",
+}
+
 
 @dataclass
 class MigrationResult:
@@ -852,6 +869,20 @@ Agent: {self.agent_id or 'default'}
         if model_config.get("primary"):
             primary = model_config["primary"]
 
+            # Check if the model is from an unsupported provider
+            primary_lower = primary.lower()
+            for prefix, provider_name in UNSUPPORTED_MODEL_PREFIXES.items():
+                if primary_lower.startswith(prefix):
+                    self.logger.warn(
+                        f"Model '{primary}' ({provider_name}) is not directly supported by Hermes.\n"
+                        f"         Hermes supports: OpenAI, OpenRouter, Nous Portal, z.ai/GLM, Kimi, MiniMax.\n"
+                        f"         Tip: You can use this model via OpenRouter (openrouter.ai)."
+                    )
+                    result.warnings.append(
+                        f"Model '{primary}' ({provider_name}) not directly supported by Hermes"
+                    )
+                    break
+
             if "model" not in hermes_config or not isinstance(hermes_config["model"], dict):
                 hermes_config["model"] = {}
 
@@ -865,8 +896,14 @@ Agent: {self.agent_id or 'default'}
 
         providers = oc_config.get("models", {}).get("providers", {})
         for name, provider in providers.items():
+            name_lower = name.lower()
             self.logger.debug(f"Found custom provider: {name} ({provider.get('api', 'unknown')})")
-            result.warnings.append(f"Custom provider '{name}' noted - manual config may be needed")
+            if name_lower not in HERMES_SUPPORTED_PROVIDERS:
+                result.warnings.append(
+                    f"Provider '{name}' may not be supported by Hermes - manual config needed"
+                )
+            else:
+                result.warnings.append(f"Custom provider '{name}' noted - manual config may be needed")
 
         result.success = bool(result.items_migrated)
         return result

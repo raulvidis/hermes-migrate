@@ -43,7 +43,14 @@ def _uninstall():
         except (EOFError, KeyboardInterrupt):
             answer = ""
         if answer in ("y", "yes"):
-            shutil.rmtree(repo_dir, ignore_errors=True)
+            # Use background rm -rf instead of shutil.rmtree to avoid
+            # blocking for minutes on large repos with venvs/.git objects
+            subprocess.Popen(
+                ["rm", "-rf", str(repo_dir)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
             removed.append(str(repo_dir))
 
     if removed:
