@@ -1300,11 +1300,45 @@ Agent: {self.agent_id or 'default'}
             except (json.JSONDecodeError, OSError):
                 pass
 
+        # Discover Hermes env var names from the .env template
+        # This ensures we use the correct variable names regardless of provider
+        provider_env_map = {}
+        hermes_env_path = HERMES_DIR / ".env"
+        if hermes_env_path.exists():
+            try:
+                env_text = hermes_env_path.read_text(encoding="utf-8")
+                # Find all KEY_API_KEY= and KEY_BASE_URL= patterns
+                # (both set and commented-out template lines)
+                for env_line in env_text.splitlines():
+                    stripped = env_line.lstrip("# ").strip()
+                    if "_API_KEY=" in stripped or "_BASE_URL=" in stripped:
+                        var_name = stripped.split("=", 1)[0].strip()
+                        # Extract prefix (e.g. GLM from GLM_API_KEY)
+                        if var_name.endswith("_API_KEY"):
+                            prefix = var_name[: -len("_API_KEY")]
+                        elif var_name.endswith("_BASE_URL"):
+                            prefix = var_name[: -len("_BASE_URL")]
+                        else:
+                            continue
+                        # Map lowercase prefix to the template prefix
+                        if prefix:
+                            provider_env_map[prefix.lower()] = prefix
+            except OSError:
+                pass
+
+        # Add known OpenClaw-to-Hermes name mappings as fallbacks
+        provider_env_map.setdefault("zai", "GLM")
+        provider_env_map.setdefault("z.ai", "GLM")
+
         # Custom model provider API keys (from auth profiles, models.json, or config)
         providers = oc_config.get("models", {}).get("providers", {})
         for name, prov in providers.items():
             base_url = prov.get("baseUrl", "")
-            name_upper = name.upper().replace("-", "_").replace(".", "_")
+            # Use Hermes env var name if known, otherwise derive from provider name
+            env_prefix = provider_env_map.get(
+                name.lower(),
+                name.upper().replace("-", "_").replace(".", "_"),
+            )
 
             # Find API key from multiple sources
             api_key = prov.get("apiKey")
@@ -1322,9 +1356,9 @@ Agent: {self.agent_id or 'default'}
             if base_url or api_key:
                 env_lines.append(f"# Custom provider: {name}")
                 if base_url:
-                    env_lines.append(f"{name_upper}_BASE_URL={base_url}")
+                    env_lines.append(f"{env_prefix}_BASE_URL={base_url}")
                 if api_key:
-                    env_lines.append(f"{name_upper}_API_KEY={api_key}")
+                    env_lines.append(f"{env_prefix}_API_KEY={api_key}")
                     items.append(f"{name} API key")
                 env_lines.append("")
 
@@ -1336,16 +1370,80 @@ Agent: {self.agent_id or 'default'}
         env_content = "\n".join(env_lines) + "\n"
         dst = HERMES_DIR / ".env"
 
+        # Determine the primary model name for LLM_MODEL env var
+        primary_model = ""
+        if self.agent_id:
+            agent_list = oc_config.get("agents", {}).get("list", [])
+            for agent in agent_list:
+                if agent.get("id") == self.agent_id:
+                    primary_model = agent.get("model", "")
+                    break
+        if not primary_model:
+            defaults = oc_config.get("agents", {}).get("defaults", {})
+            primary_model = defaults.get("model", {}).get("primary", "")
+        # Strip provider prefix (e.g. zai/glm-5 -> glm-5)
+        if "/" in primary_model:
+            primary_model = primary_model.split("/", 1)[1]
+
         if self.dry_run:
             self.logger.debug(f"Would write {len(items)} credentials to .env")
         else:
-            # If .env exists, append our section
-            mode = "a" if dst.exists() else "w"
-            if mode == "a":
-                env_content = "\n# --- OpenClaw Migration ---\n" + env_content
+            # If .env already exists (from Hermes installer), patch template
+            # values in-place before appending our migration section
+            if dst.exists():
+                existing = dst.read_text(encoding="utf-8")
 
-            with open(dst, mode, encoding="utf-8") as f:
-                f.write(env_content)
+                # Build replacements for template values
+                replacements = {}
+                if primary_model:
+                    replacements["LLM_MODEL"] = primary_model
+
+                # Collect provider keys/urls to patch in the template
+                for name, prov in providers.items():
+                    env_prefix = provider_env_map.get(
+                        name.lower(),
+                        name.upper().replace("-", "_").replace(".", "_"),
+                    )
+                    # Find API key
+                    api_key = prov.get("apiKey")
+                    if not api_key:
+                        agent_prov = agent_models.get("providers", {}).get(name, {})
+                        api_key = agent_prov.get("apiKey")
+                    if not api_key:
+                        for pk, profile in auth_profiles.items():
+                            if profile.get("provider") == name:
+                                api_key = profile.get("key") or profile.get("token")
+                                break
+                    base_url = prov.get("baseUrl", "")
+                    if api_key:
+                        replacements[f"{env_prefix}_API_KEY"] = api_key
+                    if base_url:
+                        replacements[f"{env_prefix}_BASE_URL"] = base_url
+
+                # Apply replacements to existing template lines
+                patched_lines = []
+                for line in existing.splitlines():
+                    patched = False
+                    for key, value in replacements.items():
+                        # Match "KEY=" or "# KEY=" (commented template)
+                        if line.startswith(f"{key}="):
+                            patched_lines.append(f"{key}={value}")
+                            patched = True
+                            break
+                        elif line.startswith(f"# {key}="):
+                            patched_lines.append(f"{key}={value}")
+                            patched = True
+                            break
+                    if not patched:
+                        patched_lines.append(line)
+
+                existing = "\n".join(patched_lines) + "\n"
+                env_content = existing + "\n# --- OpenClaw Migration ---\n" + env_content
+                with open(dst, "w", encoding="utf-8") as f:
+                    f.write(env_content)
+            else:
+                with open(dst, "w", encoding="utf-8") as f:
+                    f.write(env_content)
 
             # Set restrictive permissions (owner-only)
             try:
