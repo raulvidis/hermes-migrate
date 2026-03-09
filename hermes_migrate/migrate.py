@@ -906,6 +906,11 @@ Agent: {self.agent_id or 'default'}
 
             hermes_config["model"]["default"] = primary
 
+            # Remove OpenRouter base_url default — Hermes auto-detects
+            # the correct endpoint from provider env vars (ZAI_API_KEY, etc.)
+            hermes_config["model"].pop("base_url", None)
+            hermes_config["model"].pop("provider", None)
+
             # Filter fallbacks to only include supported providers
             if model_config.get("fallbacks"):
                 supported = []
