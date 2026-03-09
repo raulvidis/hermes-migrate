@@ -34,7 +34,7 @@ jobs:
 
       - name: Check formatting
         if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
-        run: black --check openclaw_to_hermes/ tests/
+        run: black --check hermes_migrate/ tests/
 
       - name: Lint
         if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'

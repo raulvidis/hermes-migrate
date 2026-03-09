@@ -21,7 +21,7 @@ All tests must pass before submitting a PR. The test suite covers migration logi
 ## Code Style
 
 ```bash
-black openclaw_to_hermes/ tests/
+black hermes_migrate/ tests/
 ruff check .
 ```
 

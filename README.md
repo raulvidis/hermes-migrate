@@ -169,7 +169,7 @@ pytest
 pytest -v
 
 # Format
-black openclaw_to_hermes/ tests/
+black hermes_migrate/ tests/
 
 # Lint
 ruff check .
@@ -178,7 +178,7 @@ ruff check .
 ### Project Structure
 
 ```
-openclaw_to_hermes/
+hermes_migrate/
   __init__.py        # Package version
   cli.py             # CLI entry point
   migrate.py         # All migration logic

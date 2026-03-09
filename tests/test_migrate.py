@@ -8,7 +8,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from openclaw_to_hermes.migrate import (
+from hermes_migrate.migrate import (
     OpenClawMigrator,
     HermesInstaller,
     MigrationLogger,
@@ -80,8 +80,8 @@ class TestGetAgentChannels:
 
 class TestMigrateSoul:
     def test_migrate_soul_dry_run(self, openclaw_with_files, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.OPENCLAW_DIR", openclaw_with_files)
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", openclaw_with_files)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=True, agent_id="test")
         result = migrator.migrate_soul()
@@ -91,8 +91,8 @@ class TestMigrateSoul:
         assert not (tmp_hermes / "SOUL.md").exists()
 
     def test_migrate_soul_writes_file(self, openclaw_with_files, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.OPENCLAW_DIR", openclaw_with_files)
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", openclaw_with_files)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         result = migrator.migrate_soul()
@@ -102,8 +102,8 @@ class TestMigrateSoul:
         assert "Migrated from OpenClaw" in content
 
     def test_migrate_soul_missing(self, tmp_openclaw, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.OPENCLAW_DIR", tmp_openclaw)
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", tmp_openclaw)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         result = migrator.migrate_soul()
@@ -113,8 +113,8 @@ class TestMigrateSoul:
 
 class TestMigrateMemory:
     def test_migrate_all_memory(self, openclaw_with_files, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.OPENCLAW_DIR", openclaw_with_files)
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", openclaw_with_files)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         result = migrator.migrate_memory()
@@ -128,8 +128,8 @@ class TestMigrateMemory:
         assert "User prefers concise answers" in (mem_dir / "MEMORY.md").read_text()
 
     def test_migrate_daily_memories(self, openclaw_with_files, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.OPENCLAW_DIR", openclaw_with_files)
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", openclaw_with_files)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         result = migrator.migrate_memory()
@@ -142,8 +142,8 @@ class TestMigrateMemory:
 
 class TestMigrateWorkspaceFiles:
     def test_copies_workspace_files(self, openclaw_with_files, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.OPENCLAW_DIR", openclaw_with_files)
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", openclaw_with_files)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         result = migrator.migrate_workspace_files()
@@ -212,7 +212,7 @@ class TestMigrateModels:
 
 class TestMigrateAgents:
     def test_documents_multi_agent(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         result = migrator.migrate_agents(sample_openclaw_config)
@@ -227,7 +227,7 @@ class TestMigrateAgents:
         assert "SELECTED" in content
 
     def test_documents_acp(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         result = migrator.migrate_agents(sample_openclaw_config)
@@ -249,19 +249,19 @@ class TestHermesInstaller:
             assert installer.is_hermes_installed() is False
 
     def test_hermes_dir_exists(self, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
         logger = MigrationLogger()
         installer = HermesInstaller(logger)
         assert installer.is_hermes_dir_exists() is True
 
     def test_hermes_dir_not_exists(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path / "nonexistent")
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_path / "nonexistent")
         logger = MigrationLogger()
         installer = HermesInstaller(logger)
         assert installer.is_hermes_dir_exists() is False
 
     def test_ensure_returns_false_without_auto_install(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path / "nonexistent")
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_path / "nonexistent")
         logger = MigrationLogger()
         installer = HermesInstaller(logger)
         with patch("subprocess.run", side_effect=FileNotFoundError):
@@ -274,7 +274,7 @@ class TestHermesInstaller:
 
 class TestBackupHermes:
     def test_creates_backup(self, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
         (tmp_hermes / "config.yaml").write_text("model:\n  default: gpt-4\n")
         (tmp_hermes / "SOUL.md").write_text("Test persona")
 
@@ -286,15 +286,15 @@ class TestBackupHermes:
         assert (backup / "SOUL.md").exists()
 
     def test_no_backup_if_no_hermes(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path / "nonexistent")
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_path / "nonexistent")
         migrator = OpenClawMigrator(dry_run=False)
         assert migrator._backup_hermes() is None
 
 
 class TestMigrateHeartbeat:
     def test_migrate_heartbeat(self, openclaw_with_files, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.OPENCLAW_DIR", openclaw_with_files)
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", openclaw_with_files)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         result = migrator.migrate_heartbeat()
@@ -305,8 +305,8 @@ class TestMigrateHeartbeat:
         assert "Migrated from OpenClaw" in content
 
     def test_heartbeat_dry_run(self, openclaw_with_files, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.OPENCLAW_DIR", openclaw_with_files)
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", openclaw_with_files)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=True, agent_id="test")
         result = migrator.migrate_heartbeat()
@@ -314,8 +314,8 @@ class TestMigrateHeartbeat:
         assert not (tmp_hermes / "memories" / "HEARTBEAT.md").exists()
 
     def test_heartbeat_missing(self, tmp_openclaw, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.OPENCLAW_DIR", tmp_openclaw)
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", tmp_openclaw)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         result = migrator.migrate_heartbeat()
@@ -325,7 +325,7 @@ class TestMigrateHeartbeat:
 
 class TestMigrateEnvTemplate:
     def test_creates_env_openclaw(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         result = migrator.migrate_env_template(sample_openclaw_config)
@@ -342,7 +342,7 @@ class TestMigrateEnvTemplate:
         assert "xoxb-fake-slack-token" not in content
 
     def test_env_dry_run(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=True, agent_id="cleo")
         result = migrator.migrate_env_template(sample_openclaw_config)
@@ -350,7 +350,7 @@ class TestMigrateEnvTemplate:
         assert not (tmp_hermes / ".env.openclaw").exists()
 
     def test_env_includes_web_search(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         result = migrator.migrate_env_template(sample_openclaw_config)
@@ -358,7 +358,7 @@ class TestMigrateEnvTemplate:
         assert "FIRECRAWL_API_KEY" in content
 
     def test_env_includes_custom_providers(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         result = migrator.migrate_env_template(sample_openclaw_config)
@@ -366,7 +366,7 @@ class TestMigrateEnvTemplate:
         assert "custom-llm" in content
 
     def test_env_includes_allowed_users(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         result = migrator.migrate_env_template(sample_openclaw_config)
@@ -375,7 +375,7 @@ class TestMigrateEnvTemplate:
         assert "5594479851" in content
 
     def test_empty_channels(self, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         result = migrator.migrate_env_template({"channels": {}, "tools": {}})
@@ -458,7 +458,7 @@ class TestMigrateAdvancedConfig:
 
 class TestMigrateChannelDetails:
     def test_creates_channel_docs(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         result = migrator.migrate_channel_details(sample_openclaw_config)
@@ -468,7 +468,7 @@ class TestMigrateChannelDetails:
         assert "Slack" in doc
 
     def test_redacts_secrets(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         migrator.migrate_channel_details(sample_openclaw_config)
@@ -477,7 +477,7 @@ class TestMigrateChannelDetails:
         assert "xoxb-fake-slack-token" not in doc
 
     def test_marks_selected_agent(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         migrator.migrate_channel_details(sample_openclaw_config)
@@ -485,7 +485,7 @@ class TestMigrateChannelDetails:
         assert "SELECTED" in doc
 
     def test_dry_run(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=True, agent_id="cleo")
         result = migrator.migrate_channel_details(sample_openclaw_config)
@@ -493,7 +493,7 @@ class TestMigrateChannelDetails:
         assert not (tmp_hermes / "memories" / "openclaw_channels.md").exists()
 
     def test_no_channels(self, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         result = migrator.migrate_channel_details({"channels": {}})
@@ -502,7 +502,7 @@ class TestMigrateChannelDetails:
 
 class TestMigrateInfrastructure:
     def test_creates_infrastructure_docs(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         result = migrator.migrate_infrastructure(sample_openclaw_config)
@@ -515,7 +515,7 @@ class TestMigrateInfrastructure:
         assert "Tools" in doc
 
     def test_documents_custom_providers(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         migrator.migrate_infrastructure(sample_openclaw_config)
@@ -524,7 +524,7 @@ class TestMigrateInfrastructure:
         assert "my-llm.example.com" in doc
 
     def test_redacts_gateway_secrets(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         migrator.migrate_infrastructure(sample_openclaw_config)
@@ -532,7 +532,7 @@ class TestMigrateInfrastructure:
         assert "fake-gateway-token" not in doc
 
     def test_documents_hooks(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         migrator.migrate_infrastructure(sample_openclaw_config)
@@ -541,7 +541,7 @@ class TestMigrateInfrastructure:
         assert "session-memory" in doc
 
     def test_documents_cron(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
         migrator.migrate_infrastructure(sample_openclaw_config)
@@ -549,7 +549,7 @@ class TestMigrateInfrastructure:
         assert "Session retention" in doc or "session" in doc.lower()
 
     def test_dry_run(self, sample_openclaw_config, tmp_hermes, monkeypatch):
-        monkeypatch.setattr("openclaw_to_hermes.migrate.HERMES_DIR", tmp_hermes)
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
 
         migrator = OpenClawMigrator(dry_run=True, agent_id="cleo")
         result = migrator.migrate_infrastructure(sample_openclaw_config)
@@ -589,7 +589,7 @@ class TestStopOpenClaw:
 class TestMigrateCredentials:
     def test_extracts_telegram_token_for_agent(self, tmp_path, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             result = migrator.migrate_credentials(sample_openclaw_config)
         assert result.success is True
         assert "Telegram bot token" in result.items_migrated
@@ -598,7 +598,7 @@ class TestMigrateCredentials:
 
     def test_extracts_correct_agent_telegram_token(self, tmp_path, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=False, agent_id="hank")
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             result = migrator.migrate_credentials(sample_openclaw_config)
         env_content = (tmp_path / ".env").read_text(encoding="utf-8")
         assert "987654321:ZYXwvuTSRqpoNMLkjiHGFedcba" in env_content
@@ -606,7 +606,7 @@ class TestMigrateCredentials:
 
     def test_extracts_slack_token_from_accounts(self, tmp_path, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=False, agent_id="nora")
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             result = migrator.migrate_credentials(sample_openclaw_config)
         assert result.success is True
         assert "Slack bot token" in result.items_migrated
@@ -615,7 +615,7 @@ class TestMigrateCredentials:
 
     def test_extracts_telegram_allowed_users(self, tmp_path, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             migrator.migrate_credentials(sample_openclaw_config)
         env_content = (tmp_path / ".env").read_text(encoding="utf-8")
         assert "TELEGRAM_ALLOWED_USERS=" in env_content
@@ -623,7 +623,7 @@ class TestMigrateCredentials:
 
     def test_extracts_web_search_api_key(self, tmp_path, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             result = migrator.migrate_credentials(sample_openclaw_config)
         assert "Web search API key" in result.items_migrated
         env_content = (tmp_path / ".env").read_text(encoding="utf-8")
@@ -631,7 +631,7 @@ class TestMigrateCredentials:
 
     def test_dry_run_no_file_written(self, tmp_path, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=True, agent_id="cleo")
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             result = migrator.migrate_credentials(sample_openclaw_config)
         assert result.success is True
         assert not (tmp_path / ".env").exists()
@@ -639,7 +639,7 @@ class TestMigrateCredentials:
     def test_no_credentials_returns_success(self, tmp_path):
         migrator = OpenClawMigrator(dry_run=False, agent_id="test")
         empty_config = {"channels": {}, "tools": {}, "models": {}}
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             result = migrator.migrate_credentials(empty_config)
         assert result.success is True
         assert not result.items_migrated
@@ -648,7 +648,7 @@ class TestMigrateCredentials:
         existing_env = tmp_path / ".env"
         existing_env.write_text("EXISTING_VAR=hello\n", encoding="utf-8")
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             migrator.migrate_credentials(sample_openclaw_config)
         env_content = existing_env.read_text(encoding="utf-8")
         assert "EXISTING_VAR=hello" in env_content
@@ -657,14 +657,14 @@ class TestMigrateCredentials:
 
     def test_extracts_custom_provider_base_url(self, tmp_path, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             migrator.migrate_credentials(sample_openclaw_config)
         env_content = (tmp_path / ".env").read_text(encoding="utf-8")
         assert "CUSTOM_LLM_BASE_URL=https://my-llm.example.com/v1" in env_content
 
     def test_extracts_memory_search_api_key(self, tmp_path, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             result = migrator.migrate_credentials(sample_openclaw_config)
         assert any("GEMINI" in item for item in result.items_migrated)
         env_content = (tmp_path / ".env").read_text(encoding="utf-8")
@@ -672,7 +672,7 @@ class TestMigrateCredentials:
 
     def test_extracts_gateway_auth_token(self, tmp_path, sample_openclaw_config):
         migrator = OpenClawMigrator(dry_run=False, agent_id="cleo")
-        with patch("openclaw_to_hermes.migrate.HERMES_DIR", tmp_path):
+        with patch("hermes_migrate.migrate.HERMES_DIR", tmp_path):
             result = migrator.migrate_credentials(sample_openclaw_config)
         assert "Gateway auth token" in result.items_migrated
         env_content = (tmp_path / ".env").read_text(encoding="utf-8")

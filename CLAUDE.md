@@ -7,7 +7,7 @@ End-to-end CLI migration tool: OpenClaw (`~/.openclaw/`) to Hermes (`~/.hermes/`
 ## Architecture
 
 ```
-openclaw_to_hermes/
+hermes_migrate/
   __init__.py        # Package version
   cli.py             # argparse CLI entry point
   migrate.py         # All migration logic (~1700 lines)
@@ -18,7 +18,7 @@ tests/
   test_security.py   # Redaction and security tests
 ```
 
-Entry point: `openclaw_to_hermes.cli:main`
+Entry point: `hermes_migrate.cli:main`
 
 ## Key Classes (migrate.py)
 
@@ -60,7 +60,7 @@ Entry point: `openclaw_to_hermes.cli:main`
 ```bash
 pip install -e ".[dev]"
 pytest -v                          # 107 tests
-black openclaw_to_hermes/ tests/   # format
+black hermes_migrate/ tests/   # format
 ruff check .                       # lint
 ```
 

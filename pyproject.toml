@@ -42,7 +42,7 @@ dev = [
 ]
 
 [project.scripts]
-hermes-migrate = "openclaw_to_hermes.cli:main"
+hermes-migrate = "hermes_migrate.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/raulvidis/hermes-migrate"

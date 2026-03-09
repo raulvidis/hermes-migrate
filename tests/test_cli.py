@@ -9,7 +9,7 @@ import pytest
 class TestCLIParsing:
     def test_dry_run_flag(self):
         with patch("sys.argv", ["hermes-migrate", "--dry-run"]):
-            from openclaw_to_hermes.cli import main
+            from hermes_migrate.cli import main
             # We can't run main() without OpenClaw dir, but we can test argparse
             import argparse
             parser = argparse.ArgumentParser()
@@ -45,16 +45,16 @@ class TestCLIParsing:
 
     def test_exits_without_openclaw(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "openclaw_to_hermes.migrate.OPENCLAW_DIR",
+            "hermes_migrate.migrate.OPENCLAW_DIR",
             tmp_path / "nonexistent"
         )
         # Also patch in the cli module's imported reference
         monkeypatch.setattr(
-            "openclaw_to_hermes.cli.OPENCLAW_DIR",
+            "hermes_migrate.cli.OPENCLAW_DIR",
             tmp_path / "nonexistent"
         )
         monkeypatch.setattr("sys.argv", ["hermes-migrate"])
-        from openclaw_to_hermes.cli import main
+        from hermes_migrate.cli import main
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 1

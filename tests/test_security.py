@@ -1,6 +1,6 @@
 """Tests for sensitive data redaction and security."""
 
-from openclaw_to_hermes.migrate import (
+from hermes_migrate.migrate import (
     is_sensitive_field,
     redact_sensitive_fields,
     MigrationLogger,
