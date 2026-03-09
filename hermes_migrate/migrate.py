@@ -197,25 +197,24 @@ class HermesInstaller:
         self.logger.info("Hermes not found. Starting installation...")
         self.logger.info("Using official installer from NousResearch/hermes-agent")
 
-        # Use the official installer
+        # Use the official installer — run interactively (may prompt for sudo/API keys)
         try:
             self.logger.info("Running: curl -fsSL ... | bash")
-            result = subprocess.run(
+            self.logger.info("(The installer may ask for sudo password and API keys)\n")
+            returncode = subprocess.call(
                 f"curl -fsSL {self.HERMES_INSTALL_URL} | bash",
                 shell=True,
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 minutes
+                timeout=600,  # 10 minutes (interactive prompts)
             )
 
-            if result.returncode == 0:
+            if returncode == 0:
                 self.logger.success("Hermes installed successfully!")
                 self.logger.info(
                     "Run 'source ~/.bashrc' or restart your shell, then 'hermes setup'"
                 )
                 return True
             else:
-                self.logger.error(f"Installation failed: {result.stderr}")
+                self.logger.error(f"Installation failed (exit code {returncode})")
                 return False
 
         except subprocess.TimeoutExpired:
