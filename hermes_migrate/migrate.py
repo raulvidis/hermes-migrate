@@ -883,9 +883,11 @@ Agent: {self.agent_id or 'default'}
             for prefix, provider_name in UNSUPPORTED_MODEL_PREFIXES.items():
                 if primary_lower.startswith(prefix):
                     self.logger.warn(
-                        f"Model '{primary}' ({provider_name}) is not directly supported by Hermes.\n"
-                        f"         Hermes supports: OpenAI, OpenRouter, Nous Portal, z.ai/GLM, Kimi, MiniMax.\n"
-                        f"         Tip: You can use this model via OpenRouter (openrouter.ai)."
+                        f"Model '{primary}' ({provider_name}) is not"
+                        f" directly supported by Hermes.\n"
+                        f"         Hermes supports: OpenAI, OpenRouter,"
+                        f" Nous Portal, z.ai/GLM, Kimi, MiniMax.\n"
+                        f"         Tip: Use this model via OpenRouter."
                     )
                     result.warnings.append(
                         f"Model '{primary}' ({provider_name}) not directly supported by Hermes"

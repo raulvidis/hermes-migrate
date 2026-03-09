@@ -13,7 +13,6 @@ from .migrate import HERMES_DIR, OPENCLAW_DIR, HermesInstaller, MigrationLogger,
 
 def _uninstall():
     """Remove hermes-migrate: symlink, pip package, and optionally the repo clone."""
-    import shutil
     import subprocess
 
     removed = []
