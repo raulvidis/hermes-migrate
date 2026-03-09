@@ -141,18 +141,21 @@ For more info: https://github.com/raulvidis/hermes-migrate
             sys.exit(1)
         else:
             print(f"\n  Hermes not found at {HERMES_DIR}")
+            print("  Hermes needs to be installed before migration.\n")
             try:
-                answer = input("  Install Hermes now? [Y/n] ").strip().lower()
+                answer = input("  Do you want to configure Hermes yourself? [y/N] ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 answer = "n"
                 print("")
-            if answer in ("n", "no"):
-                print("  Skipping install. Creating directory for migration only...")
-                HERMES_DIR.mkdir(parents=True, exist_ok=True)
-                (HERMES_DIR / "memories").mkdir(parents=True, exist_ok=True)
+            if answer in ("y", "yes"):
+                # Run installer interactively — user handles all prompts
+                if not installer.install_hermes(interactive=True):
+                    sys.exit(1)
             else:
-                if not installer.install_hermes():
-                    print("  Installation failed. Creating directory for migration only...")
+                # Run installer with auto-skip — accept all defaults
+                print("  Installing Hermes with default settings...\n")
+                if not installer.install_hermes(interactive=False):
+                    print("\n  Installation failed. Creating directory for migration only...")
                     HERMES_DIR.mkdir(parents=True, exist_ok=True)
                     (HERMES_DIR / "memories").mkdir(parents=True, exist_ok=True)
 

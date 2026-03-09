@@ -192,24 +192,25 @@ class HermesInstaller:
         """Check if Hermes directory exists."""
         return HERMES_DIR.exists()
 
-    def install_hermes(self) -> bool:
-        """Install Hermes using the official installer, skipping interactive setup."""
-        self.logger.info("Installing Hermes (skipping interactive setup)...")
+    def install_hermes(self, interactive: bool = False) -> bool:
+        """Install Hermes using the official installer.
 
-        # Pipe empty lines to skip all interactive prompts (API keys, config, etc.)
-        # The migration will handle config — we just need Hermes on PATH.
+        Args:
+            interactive: If True, let user handle all prompts.
+                         If False, auto-skip prompts with defaults.
+        """
+        if interactive:
+            self.logger.info("Installing Hermes (interactive setup)...\n")
+            cmd = f"curl -fsSL {self.HERMES_INSTALL_URL} | bash"
+        else:
+            self.logger.info("Installing Hermes (default settings)...")
+            cmd = f'yes "" | curl -fsSL {self.HERMES_INSTALL_URL} | bash'
+
         try:
-            returncode = subprocess.call(
-                f'yes "" | curl -fsSL {self.HERMES_INSTALL_URL} | bash',
-                shell=True,
-                timeout=600,  # 10 minutes
-            )
+            returncode = subprocess.call(cmd, shell=True, timeout=600)
 
             if returncode == 0:
                 self.logger.success("Hermes installed successfully!")
-                self.logger.info(
-                    "Run 'source ~/.bashrc' or restart your shell, then 'hermes setup'"
-                )
                 return True
             else:
                 self.logger.error(f"Installation failed (exit code {returncode})")
