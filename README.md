@@ -23,8 +23,9 @@ For locked-down systems (Debian/Ubuntu with externally-managed Python):
 ```bash
 git clone https://github.com/raulvidis/hermes-migrate.git
 cd hermes-migrate
-python3 -m hermes_migrate.cli --dry-run -v   # preview
-python3 -m hermes_migrate.cli -v             # full migration
+./install.sh
+hermes-migrate --dry-run -v   # preview
+hermes-migrate -v             # full migration
 ```
 
 Only requires Python 3.9+ and PyYAML (usually pre-installed).
