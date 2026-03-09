@@ -140,7 +140,15 @@ For more info: https://github.com/raulvidis/hermes-migrate
             print("  Remove --no-install to auto-install, or install manually.\n")
             sys.exit(1)
         else:
-            print("\n  Hermes not found. Installing automatically...")
+            print(f"\n  Hermes not found at {HERMES_DIR}")
+            try:
+                answer = input("  Install Hermes now? [Y/n] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = "n"
+                print("")
+            if answer in ("n", "no"):
+                print("  Skipping install. Create ~/.hermes/ manually or re-run.\n")
+                sys.exit(1)
             if not installer.install_hermes():
                 sys.exit(1)
 
