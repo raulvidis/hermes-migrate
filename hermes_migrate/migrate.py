@@ -1864,14 +1864,14 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
             self.logger.error(f"OpenClaw directory not found: {OPENCLAW_DIR}")
             return False
 
-        # Ensure Hermes is installed (auto-install if needed)
+        # Check Hermes status (don't auto-install — CLI handles that)
         installer = HermesInstaller(self.logger)
-        if not installer.ensure_hermes_installed(auto_install=True):
-            self.logger.error(
-                "Hermes installation required. Run: curl -fsSL https://raw.githubusercontent.com"
-                "/NousResearch/hermes-agent/main/scripts/install.sh | bash"
-            )
-            return False
+        if installer.is_hermes_installed():
+            self.logger.success("Hermes is installed")
+        elif installer.is_hermes_dir_exists():
+            self.logger.info("Hermes directory exists (CLI not in PATH yet)")
+        else:
+            self.logger.info("Hermes not installed — migrating config only")
 
         # Setup Hermes directory
         self._ensure_hermes_dir()
