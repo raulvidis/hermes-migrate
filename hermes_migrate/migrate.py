@@ -899,8 +899,27 @@ Agent: {self.agent_id or 'default'}
 
             hermes_config["model"]["default"] = primary
 
+            # If model uses a custom provider, set base_url from provider config
+            providers = oc_config.get("models", {}).get("providers", {})
+            model_prefix = primary.split("/")[0] if "/" in primary else ""
+            if model_prefix and model_prefix in providers:
+                base_url = providers[model_prefix].get("baseUrl", "")
+                if base_url:
+                    hermes_config["model"]["base_url"] = base_url
+                    self.logger.debug(f"Set model base_url: {base_url}")
+
+            # Filter fallbacks to only include supported providers
             if model_config.get("fallbacks"):
-                hermes_config["model"]["fallbacks"] = model_config["fallbacks"]
+                supported = []
+                for fb in model_config["fallbacks"]:
+                    fb_lower = fb.lower()
+                    is_unsupported = any(fb_lower.startswith(p) for p in UNSUPPORTED_MODEL_PREFIXES)
+                    if is_unsupported:
+                        self.logger.debug(f"Skipping unsupported fallback: {fb}")
+                    else:
+                        supported.append(fb)
+                if supported:
+                    hermes_config["model"]["fallbacks"] = supported
 
             self.logger.success(f"Set model for '{self.agent_id}': {primary}")
             result.items_migrated.append(f"model: {primary}")
@@ -1263,15 +1282,52 @@ Agent: {self.agent_id or 'default'}
             items.append("Gateway auth token")
             env_lines.append("")
 
-        # Custom model provider API keys (from auth profiles or provider config)
+        # Load auth profiles for API keys stored outside openclaw.json
+        auth_profiles = {}
+        agent_dir = self.agent_id or "main"
+        auth_path = OPENCLAW_DIR / "agents" / agent_dir / "agent" / "auth-profiles.json"
+        if auth_path.exists():
+            try:
+                with open(auth_path, encoding="utf-8") as f:
+                    auth_data = json.load(f)
+                auth_profiles = auth_data.get("profiles", {})
+                self.logger.debug(f"Loaded {len(auth_profiles)} auth profiles")
+            except (json.JSONDecodeError, OSError) as e:
+                self.logger.warn(f"Could not read auth profiles: {e}")
+
+        # Also load per-agent models.json for apiKey fields
+        models_path = OPENCLAW_DIR / "agents" / agent_dir / "agent" / "models.json"
+        agent_models = {}
+        if models_path.exists():
+            try:
+                with open(models_path, encoding="utf-8") as f:
+                    agent_models = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Custom model provider API keys (from auth profiles, models.json, or config)
         providers = oc_config.get("models", {}).get("providers", {})
         for name, prov in providers.items():
             base_url = prov.get("baseUrl", "")
-            if base_url:
-                name_upper = name.upper().replace("-", "_").replace(".", "_")
+            name_upper = name.upper().replace("-", "_").replace(".", "_")
+
+            # Find API key from multiple sources
+            api_key = prov.get("apiKey")
+            if not api_key:
+                # Check per-agent models.json
+                agent_prov = agent_models.get("providers", {}).get(name, {})
+                api_key = agent_prov.get("apiKey")
+            if not api_key:
+                # Check auth profiles (try common naming patterns)
+                for profile_key, profile in auth_profiles.items():
+                    if profile.get("provider") == name:
+                        api_key = profile.get("key") or profile.get("token")
+                        break
+
+            if base_url or api_key:
                 env_lines.append(f"# Custom provider: {name}")
-                env_lines.append(f"{name_upper}_BASE_URL={base_url}")
-                api_key = prov.get("apiKey")
+                if base_url:
+                    env_lines.append(f"{name_upper}_BASE_URL={base_url}")
                 if api_key:
                     env_lines.append(f"{name_upper}_API_KEY={api_key}")
                     items.append(f"{name} API key")
