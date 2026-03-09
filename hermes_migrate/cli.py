@@ -141,21 +141,20 @@ For more info: https://github.com/raulvidis/hermes-migrate
             sys.exit(1)
         else:
             print(f"\n  Hermes not found at {HERMES_DIR}")
-            print("  The migration will create ~/.hermes/ and copy your config.")
-            print("  You can install Hermes after migration with:")
-            print(
-                "    curl -fsSL https://raw.githubusercontent.com/NousResearch/"
-                "hermes-agent/main/scripts/install.sh | bash"
-            )
             try:
-                answer = input("\n  Proceed with migration? [Y/n] ").strip().lower()
+                answer = input("  Install Hermes now? [Y/n] ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 answer = "n"
                 print("")
             if answer in ("n", "no"):
-                sys.exit(0)
-            HERMES_DIR.mkdir(parents=True, exist_ok=True)
-            (HERMES_DIR / "memories").mkdir(parents=True, exist_ok=True)
+                print("  Skipping install. Creating directory for migration only...")
+                HERMES_DIR.mkdir(parents=True, exist_ok=True)
+                (HERMES_DIR / "memories").mkdir(parents=True, exist_ok=True)
+            else:
+                if not installer.install_hermes():
+                    print("  Installation failed. Creating directory for migration only...")
+                    HERMES_DIR.mkdir(parents=True, exist_ok=True)
+                    (HERMES_DIR / "memories").mkdir(parents=True, exist_ok=True)
 
     # Run migration
     migrator = OpenClawMigrator(

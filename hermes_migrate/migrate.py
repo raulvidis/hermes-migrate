@@ -193,18 +193,16 @@ class HermesInstaller:
         return HERMES_DIR.exists()
 
     def install_hermes(self) -> bool:
-        """Install Hermes using the official installer."""
-        self.logger.info("Hermes not found. Starting installation...")
-        self.logger.info("Using official installer from NousResearch/hermes-agent")
+        """Install Hermes using the official installer, skipping interactive setup."""
+        self.logger.info("Installing Hermes (skipping interactive setup)...")
 
-        # Use the official installer — run interactively (may prompt for sudo/API keys)
+        # Pipe empty lines to skip all interactive prompts (API keys, config, etc.)
+        # The migration will handle config — we just need Hermes on PATH.
         try:
-            self.logger.info("Running: curl -fsSL ... | bash")
-            self.logger.info("(The installer may ask for sudo password and API keys)\n")
             returncode = subprocess.call(
-                f"curl -fsSL {self.HERMES_INSTALL_URL} | bash",
+                f'yes "" | curl -fsSL {self.HERMES_INSTALL_URL} | bash',
                 shell=True,
-                timeout=600,  # 10 minutes (interactive prompts)
+                timeout=600,  # 10 minutes
             )
 
             if returncode == 0:
