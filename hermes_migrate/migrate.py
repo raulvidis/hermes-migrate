@@ -204,12 +204,11 @@ class HermesInstaller:
             cmd = f"curl -fsSL {self.HERMES_INSTALL_URL} | bash"
         else:
             self.logger.info("Installing Hermes (skipping setup wizard)...")
-            # Download script first, then run with /dev/null on stdin so the
-            # interactive setup wizard (TUI) gets EOF and exits immediately.
-            # Two-step avoids curl's stdin being affected by the redirect.
+            # The official installer supports --skip-setup to bypass the TUI wizard.
+            # Download script first so we can pass the flag to bash.
             cmd = (
                 f"tmpf=$(mktemp) && curl -fsSL {self.HERMES_INSTALL_URL} -o $tmpf"
-                f" && bash $tmpf < /dev/null; rm -f $tmpf"
+                f" && bash $tmpf --skip-setup; rm -f $tmpf"
             )
 
         try:
