@@ -34,7 +34,8 @@ if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
     export PATH="$BIN_DIR:$PATH"
 fi
 
-echo "  hermes-migrate installed: $(hermes-migrate --version)"
+echo "  hermes-migrate installed: $(hermes-migrate --version 2>/dev/null || $BIN_DIR/hermes-migrate --version)"
 echo "  Run 'hermes-migrate --dry-run -v' to preview migration"
 echo ""
-echo "  If the command is not found, run: source ~/.bashrc"
+echo "  If the command is not found, run:"
+echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
