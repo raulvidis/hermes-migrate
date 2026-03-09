@@ -63,6 +63,8 @@ Examples:
   hermes-migrate --agent cleo Migrate specific agent
   hermes-migrate --dry-run    Preview changes without writing
   hermes-migrate --no-start   Migrate but don't auto-start Hermes
+  hermes-migrate --force      Re-run migration (overwrite previous)
+  hermes-migrate -q           Quiet mode for CI/scripting
   hermes-migrate -v           Verbose output
 
 For more info: https://github.com/raulvidis/hermes-migrate
@@ -102,6 +104,19 @@ For more info: https://github.com/raulvidis/hermes-migrate
     )
 
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite previous migration (skip idempotency check)",
+    )
+
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress non-error output (for CI/scripting)",
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
@@ -132,9 +147,10 @@ For more info: https://github.com/raulvidis/hermes-migrate
     # Run migration
     migrator = OpenClawMigrator(
         dry_run=args.dry_run,
-        verbose=args.verbose,
+        verbose=args.verbose if not args.quiet else False,
         agent_id=args.agent_id,
         auto_start=not args.no_start,
+        force=args.force,
     )
     success = migrator.run()
 

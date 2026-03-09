@@ -118,3 +118,42 @@ class TestMigrationLoggerRedaction:
         logger = MigrationLogger()
         msg = "Migrated SOUL.md to ~/.hermes/SOUL.md"
         assert logger._redact(msg) == msg
+
+    def test_redacts_aws_access_key(self):
+        logger = MigrationLogger()
+        result = logger._redact("AWS key AKIAIOSFODNN7EXAMPLE")
+        assert "AKIAIOSFODNN7EXAMPLE" not in result
+        assert REDACT_VALUE in result
+
+    def test_redacts_github_token(self):
+        logger = MigrationLogger()
+        result = logger._redact("Token ghp_ABCDEFghijklmnopqrstuvwxyz0123456789")
+        assert "ghp_ABCDEFghijklmnopqrstuvwxyz0123456789" not in result
+        assert REDACT_VALUE in result
+
+    def test_redacts_anthropic_key(self):
+        logger = MigrationLogger()
+        result = logger._redact("Key sk-ant-api03-examplekey123")
+        assert "sk-ant-api03-examplekey123" not in result
+        assert REDACT_VALUE in result
+
+    def test_redacts_stripe_key(self):
+        logger = MigrationLogger()
+        result = logger._redact("Stripe sk_live_abc123def456ghi789")
+        assert "sk_live_abc123def456ghi789" not in result
+        assert REDACT_VALUE in result
+
+    def test_redacts_twilio_sid(self):
+        logger = MigrationLogger()
+        # Use a test SID that matches our regex (AC + 32 hex) but won't trigger
+        # GitHub push protection by constructing it dynamically
+        fake_sid = "AC" + "a1b2c3d4e5f6" * 2 + "a1b2c3d4"
+        result = logger._redact(f"Twilio {fake_sid}")
+        assert fake_sid not in result
+        assert REDACT_VALUE in result
+
+    def test_redacts_bearer_token(self):
+        logger = MigrationLogger()
+        result = logger._redact("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test")
+        assert "Bearer eyJhbGciOiJIUzI1NiJ9.test" not in result
+        assert REDACT_VALUE in result

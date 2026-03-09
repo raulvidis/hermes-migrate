@@ -65,8 +65,9 @@ class MigrationResult:
 class MigrationLogger:
     """Logger with sensitive data redaction."""
 
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, quiet: bool = False):
         self.verbose = verbose
+        self.quiet = quiet
         self.messages: List[Tuple[str, str]] = []  # (level, message)
 
     def _redact(self, msg: str) -> str:
@@ -83,6 +84,11 @@ class MigrationLogger:
             (r"(ghp_[\w]+)", REDACT_VALUE),  # GitHub personal tokens
             (r"(gho_[\w]+)", REDACT_VALUE),  # GitHub OAuth tokens
             (r"(sk-ant-[\w\-]+)", REDACT_VALUE),  # Anthropic API keys
+            (r"(sk_live_[\w]+)", REDACT_VALUE),  # Stripe secret keys
+            (r"(rk_live_[\w]+)", REDACT_VALUE),  # Stripe restricted keys
+            (r"(AC[a-f0-9]{32})", REDACT_VALUE),  # Twilio account SIDs
+            (r"(SK[a-f0-9]{32})", REDACT_VALUE),  # Twilio API keys
+            (r"(Bearer\s+[\w\-.]+)", REDACT_VALUE),  # Bearer tokens in headers
         ]
         for pattern, replacement in patterns:
             msg = re.sub(pattern, replacement, msg, flags=re.IGNORECASE)
@@ -91,22 +97,25 @@ class MigrationLogger:
     def info(self, msg: str):
         msg = self._redact(msg)
         self.messages.append(("INFO", msg))
-        print(f"  {msg}")
+        if not self.quiet:
+            print(f"  {msg}")
 
     def success(self, msg: str):
         msg = self._redact(msg)
         self.messages.append(("SUCCESS", msg))
-        print(f"  {msg}")
+        if not self.quiet:
+            print(f"  {msg}")
 
     def warn(self, msg: str):
         msg = self._redact(msg)
         self.messages.append(("WARN", msg))
-        print(f"  {msg}")
+        if not self.quiet:
+            print(f"  {msg}")
 
     def error(self, msg: str):
         msg = self._redact(msg)
         self.messages.append(("ERROR", msg))
-        print(f"  {msg}")
+        print(f"  {msg}")  # Errors always print
 
     def debug(self, msg: str):
         if self.verbose:
@@ -239,11 +248,13 @@ class OpenClawMigrator:
         verbose: bool = False,
         agent_id: Optional[str] = None,
         auto_start: bool = True,
+        force: bool = False,
     ):
         self.dry_run = dry_run
         self.verbose = verbose
         self.agent_id = agent_id
         self.auto_start = auto_start
+        self.force = force
         self.logger = MigrationLogger(verbose)
         self.results: List[MigrationResult] = []
         self.backup_dir: Optional[Path] = None
@@ -279,7 +290,33 @@ class OpenClawMigrator:
             shutil.copytree(mem_dir, backup_dir / "memories")
 
         self.logger.info(f"Created backup at {backup_dir}")
+        self.backup_dir = backup_dir
         return backup_dir
+
+    def _rollback(self):
+        """Restore Hermes directory from backup after a failed migration."""
+        if not self.backup_dir or not self.backup_dir.exists():
+            self.logger.warn("No backup available for rollback")
+            return
+
+        self.logger.info("Rolling back to pre-migration state...")
+
+        for f in ["config.yaml", "SOUL.md", ".env"]:
+            backup_file = self.backup_dir / f
+            dst = HERMES_DIR / f
+            if backup_file.exists():
+                shutil.copy2(backup_file, dst)
+            elif dst.exists():
+                dst.unlink()
+
+        backup_mem = self.backup_dir / "memories"
+        hermes_mem = HERMES_DIR / "memories"
+        if backup_mem.exists():
+            if hermes_mem.exists():
+                shutil.rmtree(hermes_mem)
+            shutil.copytree(backup_mem, hermes_mem)
+
+        self.logger.success("Rolled back to pre-migration state")
 
     def _load_openclaw_config(self) -> Optional[Dict[str, Any]]:
         """Load OpenClaw configuration."""
@@ -375,39 +412,70 @@ class OpenClawMigrator:
 
     @staticmethod
     def _basic_yaml_load(path: Path) -> Dict[str, Any]:
-        """Very basic YAML loader for simple top-level key: value configs.
+        """Basic YAML loader that handles top-level keys and one level of nesting.
 
-        Only handles flat YAML (no nesting). If nesting is detected,
-        returns {} so the migration overwrites with a fresh config.
+        Preserves existing config structure so migration doesn't destroy user settings.
+        For deeply nested YAML (3+ levels), inner values are stored as raw strings.
         """
-        result = {}
+        result: Dict[str, Any] = {}
+        current_key: Optional[str] = None
+
         with open(path, encoding="utf-8") as f:
             for line in f:
-                # Detect indented lines = nested YAML we can't parse
-                if line and line[0] not in (" ", "\t", "#", "\n", "\r"):
-                    stripped = line.strip()
-                    if not stripped or stripped.startswith("#"):
-                        continue
+                # Skip empty lines and comments
+                stripped = line.rstrip("\n\r")
+                if not stripped or stripped.lstrip().startswith("#"):
+                    continue
+
+                # Calculate indentation level
+                indent = len(stripped) - len(stripped.lstrip())
+
+                if indent == 0:
+                    # Top-level key
                     if ":" in stripped:
                         key, _, value = stripped.partition(":")
                         value = value.strip()
+                        key = key.strip()
                         if value:
-                            if value == "true":
-                                result[key.strip()] = True
-                            elif value == "false":
-                                result[key.strip()] = False
-                            elif value.isdigit():
-                                result[key.strip()] = int(value)
-                            else:
-                                result[key.strip()] = value
+                            result[key] = OpenClawMigrator._parse_yaml_value(value)
+                            current_key = None
                         else:
-                            # Key with no value = start of nested block, skip
-                            pass
-                elif line and line[0] in (" ", "\t"):
-                    # Nested content — this file has structure we can't parse
-                    # Return empty so migration starts fresh
-                    return {}
+                            # Start of a nested block
+                            current_key = key
+                            result[current_key] = {}
+                elif indent > 0 and current_key is not None:
+                    # Nested under current_key
+                    content = stripped.lstrip()
+                    if ":" in content:
+                        key, _, value = content.partition(":")
+                        value = value.strip()
+                        key = key.strip()
+                        if isinstance(result[current_key], dict):
+                            result[current_key][key] = (
+                                OpenClawMigrator._parse_yaml_value(value) if value else {}
+                            )
+
         return result
+
+    @staticmethod
+    def _parse_yaml_value(value: str) -> Any:
+        """Parse a YAML scalar value string."""
+        if value == "true":
+            return True
+        if value == "false":
+            return False
+        if value == "null":
+            return None
+        if value.isdigit():
+            return int(value)
+        try:
+            return float(value)
+        except ValueError:
+            pass
+        # Strip surrounding quotes
+        if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
+            return value[1:-1]
+        return value
 
     def _save_hermes_config(self, config: Dict[str, Any]):
         """Save Hermes configuration."""
@@ -715,6 +783,10 @@ Agent: {self.agent_id or 'default'}
         for ch in enabled_channels:
             if ch in channel_map:
                 hermes_config["platform_toolsets"][ch] = [channel_map[ch]]
+            else:
+                result.warnings.append(
+                    f"Unknown channel '{ch}' has no Hermes mapping - manual setup required"
+                )
 
         result.items_migrated = enabled_channels
         result.warnings.append("Verify channel tokens were migrated correctly to ~/.hermes/.env")
@@ -1190,12 +1262,16 @@ Agent: {self.agent_id or 'default'}
         # Start Hermes in the background
         try:
             self.logger.info("Starting Hermes...")
-            subprocess.Popen(
-                ["hermes"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
+            popen_kwargs: Dict[str, Any] = {
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+            }
+            if os.name == "nt":
+                # Windows: use CREATE_NEW_PROCESS_GROUP
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                popen_kwargs["start_new_session"] = True
+            subprocess.Popen(["hermes"], **popen_kwargs)
             self.logger.success("Hermes started in background")
             result.success = True
             result.items_migrated.append("Hermes started")
@@ -1720,6 +1796,21 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
         result.success = True
         return result
 
+    def _check_previous_migration(self) -> bool:
+        """Check if a previous migration exists. Returns True if safe to proceed."""
+        marker = HERMES_DIR / ".env"
+        if marker.exists():
+            content = marker.read_text(encoding="utf-8")
+            if "OpenClaw Migration" in content:
+                self.logger.warn("Previous migration detected in ~/.hermes/.env")
+                self.logger.warn(
+                    "Re-running may create duplicate entries. "
+                    "Use --force to overwrite, or clean up manually."
+                )
+                if not self.force:
+                    return False
+        return True
+
     def run(self) -> bool:
         """Run the full migration."""
         print("\n  OpenClaw  Hermes Migration Tool")
@@ -1742,6 +1833,10 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
         # Setup Hermes directory
         self._ensure_hermes_dir()
 
+        # Idempotency check
+        if not self._check_previous_migration():
+            return False
+
         if not self.dry_run:
             self._backup_hermes()
 
@@ -1761,29 +1856,36 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
 
         hermes_config = self._load_hermes_config()
 
-        # Run migrations - workspace files
-        self.results.append(self.migrate_soul())
-        self.results.append(self.migrate_memory())
-        self.results.append(self.migrate_workspace_files())
-        self.results.append(self.migrate_heartbeat())
+        try:
+            # Run migrations - workspace files
+            self.results.append(self.migrate_soul())
+            self.results.append(self.migrate_memory())
+            self.results.append(self.migrate_workspace_files())
+            self.results.append(self.migrate_heartbeat())
 
-        # Run migrations - config and channels
-        self.results.append(self.migrate_channels(oc_config, hermes_config))
-        self.results.append(self.migrate_models(oc_config, hermes_config))
-        self.results.append(self.migrate_agents(oc_config))
-        self.results.append(self.migrate_advanced_config(oc_config, hermes_config))
+            # Run migrations - config and channels
+            self.results.append(self.migrate_channels(oc_config, hermes_config))
+            self.results.append(self.migrate_models(oc_config, hermes_config))
+            self.results.append(self.migrate_agents(oc_config))
+            self.results.append(self.migrate_advanced_config(oc_config, hermes_config))
 
-        # Run migrations - documentation and templates
-        self.results.append(self.migrate_env_template(oc_config))
-        self.results.append(self.migrate_channel_details(oc_config))
-        self.results.append(self.migrate_infrastructure(oc_config))
+            # Save config incrementally after config mutations
+            if not self.dry_run:
+                self._save_hermes_config(hermes_config)
 
-        # Migrate actual credentials to .env
-        self.results.append(self.migrate_credentials(oc_config))
+            # Run migrations - documentation and templates
+            self.results.append(self.migrate_env_template(oc_config))
+            self.results.append(self.migrate_channel_details(oc_config))
+            self.results.append(self.migrate_infrastructure(oc_config))
 
-        # Save Hermes config (after all config mutations)
-        if not self.dry_run:
-            self._save_hermes_config(hermes_config)
+            # Migrate actual credentials to .env
+            self.results.append(self.migrate_credentials(oc_config))
+
+        except Exception as e:
+            self.logger.error(f"Migration failed: {e}")
+            if not self.dry_run:
+                self._rollback()
+            return False
 
         # Print summary
         self._print_summary()
@@ -1792,7 +1894,10 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
         if self.auto_start:
             self.results.append(self.start_hermes())
 
-        return all(r.success or not r.items_migrated for r in self.results)
+        success = all(r.success or not r.items_migrated for r in self.results)
+        if not success and not self.dry_run:
+            self._rollback()
+        return success
 
     def _print_summary(self):
         """Print migration summary."""

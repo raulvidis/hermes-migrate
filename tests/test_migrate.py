@@ -728,3 +728,164 @@ class TestAutoStart:
     def test_auto_start_disabled(self):
         migrator = OpenClawMigrator(dry_run=True, agent_id="test", auto_start=False)
         assert migrator.auto_start is False
+
+
+class TestBasicYamlLoad:
+    def test_loads_flat_config(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("model: gpt-4\nenabled: true\ncount: 5\n")
+        result = OpenClawMigrator._basic_yaml_load(config_file)
+        assert result["model"] == "gpt-4"
+        assert result["enabled"] is True
+        assert result["count"] == 5
+
+    def test_preserves_nested_config(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("model:\n  default: gpt-4\n  fallback: gpt-3.5\nenabled: true\n")
+        result = OpenClawMigrator._basic_yaml_load(config_file)
+        # Should preserve nested structure instead of returning {}
+        assert "model" in result
+        assert isinstance(result["model"], dict)
+        assert result["model"]["default"] == "gpt-4"
+        assert result["enabled"] is True
+
+    def test_handles_comments_and_blank_lines(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("# Comment\n\nmodel: gpt-4\n# Another\nverbose: false\n")
+        result = OpenClawMigrator._basic_yaml_load(config_file)
+        assert result["model"] == "gpt-4"
+        assert result["verbose"] is False
+
+    def test_handles_quoted_values(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("name: 'my bot'\nmodel: \"gpt-4\"\n")
+        result = OpenClawMigrator._basic_yaml_load(config_file)
+        assert result["name"] == "my bot"
+        assert result["model"] == "gpt-4"
+
+    def test_empty_file(self, tmp_path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("")
+        result = OpenClawMigrator._basic_yaml_load(config_file)
+        assert result == {}
+
+
+class TestRollback:
+    def test_rollback_restores_config(self, tmp_hermes, monkeypatch):
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
+
+        # Create original config
+        (tmp_hermes / "config.yaml").write_text("original: true\n")
+        (tmp_hermes / "SOUL.md").write_text("Original persona")
+
+        migrator = OpenClawMigrator(dry_run=False, agent_id="test")
+        migrator._backup_hermes()
+
+        # Modify files (simulate migration)
+        (tmp_hermes / "config.yaml").write_text("migrated: true\n")
+        (tmp_hermes / "SOUL.md").write_text("Migrated persona")
+
+        # Rollback
+        migrator._rollback()
+
+        assert (tmp_hermes / "config.yaml").read_text() == "original: true\n"
+        assert (tmp_hermes / "SOUL.md").read_text() == "Original persona"
+
+    def test_rollback_without_backup_warns(self, tmp_hermes, monkeypatch):
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
+        migrator = OpenClawMigrator(dry_run=False, agent_id="test")
+        # Should not crash
+        migrator._rollback()
+
+
+class TestIdempotency:
+    def test_blocks_duplicate_migration(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_path)
+        env_file = tmp_path / ".env"
+        env_file.write_text("# --- OpenClaw Migration ---\nTOKEN=abc\n")
+
+        migrator = OpenClawMigrator(dry_run=False, agent_id="test", force=False)
+        assert migrator._check_previous_migration() is False
+
+    def test_force_bypasses_check(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_path)
+        env_file = tmp_path / ".env"
+        env_file.write_text("# --- OpenClaw Migration ---\nTOKEN=abc\n")
+
+        migrator = OpenClawMigrator(dry_run=False, agent_id="test", force=True)
+        assert migrator._check_previous_migration() is True
+
+    def test_no_previous_migration_proceeds(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_path)
+        migrator = OpenClawMigrator(dry_run=False, agent_id="test")
+        assert migrator._check_previous_migration() is True
+
+
+class TestUnknownChannel:
+    def test_warns_on_unknown_channel(self):
+        migrator = OpenClawMigrator(dry_run=True, agent_id=None)
+        hermes_config = {}
+        oc_config = {
+            "channels": {"irc": {"enabled": True}},
+            "bindings": [],
+        }
+        result = migrator.migrate_channels(oc_config, hermes_config)
+        assert any("Unknown channel" in w and "irc" in w for w in result.warnings)
+
+
+class TestSelectAgentEOFError:
+    def test_eof_returns_none(self, sample_openclaw_config):
+        migrator = OpenClawMigrator(dry_run=True)
+        with patch("builtins.input", side_effect=EOFError):
+            result = migrator.select_agent(sample_openclaw_config)
+        assert result is None
+
+
+class TestRunMethod:
+    def test_run_dry_run_succeeds(
+        self, tmp_path, sample_openclaw_config, openclaw_with_files, monkeypatch
+    ):
+        import json
+
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", openclaw_with_files)
+        hermes_dir = tmp_path / ".hermes"
+        hermes_dir.mkdir()
+        (hermes_dir / "memories").mkdir()
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", hermes_dir)
+
+        # Write openclaw.json
+        config_path = openclaw_with_files / "openclaw.json"
+        config_path.write_text(json.dumps(sample_openclaw_config), encoding="utf-8")
+
+        migrator = OpenClawMigrator(dry_run=True, agent_id="cleo")
+        # Mock hermes installer
+        with patch.object(HermesInstaller, "ensure_hermes_installed", return_value=True):
+            result = migrator.run()
+        assert result is True
+
+    def test_run_fails_without_openclaw(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("hermes_migrate.migrate.OPENCLAW_DIR", tmp_path / "nonexistent")
+        migrator = OpenClawMigrator(dry_run=True, agent_id="test")
+        assert migrator.run() is False
+
+
+class TestQuietMode:
+    def test_quiet_suppresses_info(self, capsys):
+        logger = MigrationLogger(quiet=True)
+        logger.info("should not print")
+        logger.success("should not print")
+        logger.warn("should not print")
+        captured = capsys.readouterr()
+        assert "should not print" not in captured.out
+
+    def test_quiet_shows_errors(self, capsys):
+        logger = MigrationLogger(quiet=True)
+        logger.error("error message")
+        captured = capsys.readouterr()
+        assert "error message" in captured.out
+
+    def test_quiet_still_stores_messages(self):
+        logger = MigrationLogger(quiet=True)
+        logger.info("stored")
+        assert len(logger.messages) == 1
+        assert logger.messages[0] == ("INFO", "stored")
