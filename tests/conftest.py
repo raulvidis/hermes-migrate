@@ -1,4 +1,4 @@
-"""Shared test fixtures for openclaw-to-hermes tests."""
+"""Shared test fixtures for hermes-migrate tests."""
 
 import json
 import pytest
@@ -34,7 +34,17 @@ def sample_openclaw_config():
                     "primary": "anthropic/claude-sonnet-4-20250514",
                     "fallbacks": ["openai/gpt-4o"]
                 },
-                "workspace": "default"
+                "workspace": "default",
+                "compaction": {"mode": "safeguard"},
+                "maxConcurrent": 4,
+                "subagents": {"maxConcurrent": 8},
+                "heartbeat": {"every": "1h"},
+                "contextPruning": {"mode": "cache-ttl", "ttl": "1h"},
+                "memorySearch": {
+                    "provider": "gemini",
+                    "model": "gemini-embedding-001",
+                    "remote": {"apiKey": "fake-gemini-key"}
+                }
             },
             "list": [
                 {
@@ -87,7 +97,48 @@ def sample_openclaw_config():
             "backend": "docker",
             "defaultAgent": "nora",
             "allowedAgents": ["nora", "cleo"]
-        }
+        },
+        "tools": {
+            "web": {"search": {"enabled": True, "apiKey": "fake-search-key"}, "fetch": {"enabled": True}},
+            "agentToAgent": {"enabled": True},
+            "sessions": {"visibility": "all"}
+        },
+        "gateway": {
+            "port": 18789,
+            "mode": "local",
+            "bind": "loopback",
+            "auth": {"mode": "token", "token": "fake-gateway-token"},
+            "tailscale": {"mode": "off"},
+            "nodes": {"denyCommands": ["camera.snap", "screen.record"]}
+        },
+        "hooks": {
+            "internal": {
+                "enabled": True,
+                "entries": {
+                    "boot-md": {"enabled": True},
+                    "session-memory": {"enabled": True},
+                    "command-logger": {"enabled": False}
+                }
+            }
+        },
+        "plugins": {
+            "entries": {
+                "telegram": {"enabled": True},
+                "acpx": {"enabled": True, "config": {"permissionMode": "approve-all"}}
+            }
+        },
+        "cron": {"sessionRetention": "1h"},
+        "commands": {
+            "native": "auto",
+            "nativeSkills": "auto",
+            "restart": True,
+            "ownerDisplay": "raw",
+            "allowFrom": {"telegram": ["5594479851"]}
+        },
+        "session": {"dmScope": "per-channel-peer", "maintenance": {"mode": "enforce"}},
+        "messages": {"ackReactionScope": "group-mentions"},
+        "skills": {"install": {"nodeManager": "pnpm"}},
+        "update": {"channel": "stable", "auto": {"enabled": True}}
     }
 
 
@@ -119,6 +170,7 @@ def openclaw_with_files(tmp_openclaw):
     (workspace / "IDENTITY.md").write_text("Identity config here.")
     (workspace / "AGENTS.md").write_text("Agent roles documented here.")
     (workspace / "TOOLS.md").write_text("Available tools listed here.")
+    (workspace / "HEARTBEAT.md").write_text("- Check server status\n- Review daily logs")
 
     daily = workspace / "memory"
     daily.mkdir()

@@ -13,17 +13,18 @@ from .migrate import OpenClawMigrator, HermesInstaller, MigrationLogger, HERMES_
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        prog="openclaw-to-hermes",
+        prog="hermes-migrate",
         description="One-click migration from OpenClaw to Hermes AI agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  openclaw-to-hermes              Run migration (prompts for agent)
-  openclaw-to-hermes --agent cleo Migrate specific agent
-  openclaw-to-hermes --dry-run    Preview changes without writing
-  openclaw-to-hermes -v           Verbose output
+  hermes-migrate              Full migration (installs Hermes, migrates, starts)
+  hermes-migrate --agent cleo Migrate specific agent
+  hermes-migrate --dry-run    Preview changes without writing
+  hermes-migrate --no-start   Migrate but don't auto-start Hermes
+  hermes-migrate -v           Verbose output
 
-For more info: https://github.com/raulvidis/openclaw-to-hermes
+For more info: https://github.com/raulvidis/hermes-migrate
         """,
     )
     
@@ -46,9 +47,15 @@ For more info: https://github.com/raulvidis/openclaw-to-hermes
     )
     
     parser.add_argument(
-        "--install-hermes",
+        "--no-install",
         action="store_true",
-        help="Install Hermes if not found (uses official installer from NousResearch)",
+        help="Skip automatic Hermes installation if not found",
+    )
+
+    parser.add_argument(
+        "--no-start",
+        action="store_true",
+        help="Don't start Hermes after migration",
     )
     
     parser.add_argument(
@@ -68,22 +75,23 @@ For more info: https://github.com/raulvidis/openclaw-to-hermes
     # Check/install Hermes
     logger = MigrationLogger(args.verbose)
     installer = HermesInstaller(logger)
-    
+
     if not installer.is_hermes_installed() and not installer.is_hermes_dir_exists():
-        if args.install_hermes:
+        if args.no_install:
+            print(f"\n  Hermes not found at {HERMES_DIR}")
+            print("  Remove --no-install to auto-install, or install manually.\n")
+            sys.exit(1)
+        else:
+            print("\n  Hermes not found. Installing automatically...")
             if not installer.install_hermes():
                 sys.exit(1)
-        else:
-            print(f"\n  Hermes not found at {HERMES_DIR}")
-            print("  Run with --install-hermes to install automatically,")
-            print("  or install manually: pip install hermes-agent\n")
-            sys.exit(1)
-    
+
     # Run migration
     migrator = OpenClawMigrator(
         dry_run=args.dry_run,
         verbose=args.verbose,
-        agent_id=args.agent_id
+        agent_id=args.agent_id,
+        auto_start=not args.no_start,
     )
     success = migrator.run()
     

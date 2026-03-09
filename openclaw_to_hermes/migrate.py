@@ -31,6 +31,12 @@ SENSITIVE_PATTERNS = [
     r"private[_-]?key",
 ]
 
+# Fields that match sensitive patterns but are NOT secrets
+SAFE_FIELD_ALLOWLIST = {
+    "maxtokens", "max_tokens", "contexttokens", "context_tokens",
+    "totaltokens", "total_tokens", "contextwindow", "context_window",
+}
+
 # Sensitive values to redact in logs
 REDACT_VALUE = "***REDACTED***"
 
@@ -97,6 +103,8 @@ class MigrationLogger:
 def is_sensitive_field(field_name: str) -> bool:
     """Check if a field name contains sensitive patterns."""
     field_lower = field_name.lower()
+    if field_lower in SAFE_FIELD_ALLOWLIST:
+        return False
     for pattern in SENSITIVE_PATTERNS:
         if re.search(pattern, field_lower):
             return True
@@ -205,10 +213,11 @@ class HermesInstaller:
 class OpenClawMigrator:
     """Main migration class."""
     
-    def __init__(self, dry_run: bool = False, verbose: bool = False, agent_id: Optional[str] = None):
+    def __init__(self, dry_run: bool = False, verbose: bool = False, agent_id: Optional[str] = None, auto_start: bool = True):
         self.dry_run = dry_run
         self.verbose = verbose
         self.agent_id = agent_id
+        self.auto_start = auto_start
         self.logger = MigrationLogger(verbose)
         self.results: List[MigrationResult] = []
         self.backup_dir: Optional[Path] = None
@@ -259,34 +268,129 @@ class OpenClawMigrator:
         self.logger.debug(f"Loaded OpenClaw config with keys: {list(config.keys())}")
         return config
     
+    @staticmethod
+    def _yaml_serialize(data: Any, indent: int = 0) -> str:
+        """Minimal YAML serializer for when PyYAML is not available."""
+        lines = []
+        prefix = "  " * indent
+
+        if isinstance(data, dict):
+            if not data:
+                return "{}"
+            for key, value in data.items():
+                if isinstance(value, (dict, list)) and value:
+                    lines.append(f"{prefix}{key}:")
+                    lines.append(OpenClawMigrator._yaml_serialize(value, indent + 1))
+                else:
+                    serialized = OpenClawMigrator._yaml_scalar(value)
+                    lines.append(f"{prefix}{key}: {serialized}")
+        elif isinstance(data, list):
+            if not data:
+                return f"{prefix}[]"
+            for item in data:
+                if isinstance(item, dict):
+                    lines.append(f"{prefix}-")
+                    lines.append(OpenClawMigrator._yaml_serialize(item, indent + 1))
+                else:
+                    serialized = OpenClawMigrator._yaml_scalar(item)
+                    lines.append(f"{prefix}- {serialized}")
+        else:
+            return f"{prefix}{OpenClawMigrator._yaml_scalar(data)}"
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _yaml_scalar(value: Any) -> str:
+        """Serialize a scalar value to YAML."""
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, str):
+            # Quote strings that could be misinterpreted
+            if not value or value in ("true", "false", "null", "yes", "no", "on", "off"):
+                return f"'{value}'"
+            if any(c in value for c in ":{}[]#&*!|>'\"%@`"):
+                return f"'{value}'"
+            if value.startswith(("-", " ")) or value.endswith(" "):
+                return f"'{value}'"
+            return value
+        return str(value)
+
     def _load_hermes_config(self) -> Dict[str, Any]:
         """Load Hermes configuration."""
         config_path = HERMES_DIR / "config.yaml"
         if not config_path.exists():
             return {}
-        
+
         try:
             import yaml
-            with open(config_path) as f:
+            with open(config_path, encoding='utf-8') as f:
                 return yaml.safe_load(f) or {}
         except ImportError:
-            self.logger.debug("PyYAML not installed, skipping config load")
-            return {}
-    
+            # Fallback: try basic YAML parsing for simple configs
+            self.logger.debug("PyYAML not installed, attempting basic config load")
+            try:
+                return self._basic_yaml_load(config_path)
+            except Exception:
+                self.logger.debug("Basic YAML load failed, starting fresh")
+                return {}
+
+    @staticmethod
+    def _basic_yaml_load(path: Path) -> Dict[str, Any]:
+        """Very basic YAML loader for simple top-level key: value configs.
+
+        Only handles flat YAML (no nesting). If nesting is detected,
+        returns {} so the migration overwrites with a fresh config.
+        """
+        result = {}
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                # Detect indented lines = nested YAML we can't parse
+                if line and not line[0] in (' ', '\t', '#', '\n', '\r'):
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    if ":" in stripped:
+                        key, _, value = stripped.partition(":")
+                        value = value.strip()
+                        if value:
+                            if value == "true":
+                                result[key.strip()] = True
+                            elif value == "false":
+                                result[key.strip()] = False
+                            elif value.isdigit():
+                                result[key.strip()] = int(value)
+                            else:
+                                result[key.strip()] = value
+                        else:
+                            # Key with no value = start of nested block, skip
+                            pass
+                elif line and line[0] in (' ', '\t'):
+                    # Nested content — this file has structure we can't parse
+                    # Return empty so migration starts fresh
+                    return {}
+        return result
+
     def _save_hermes_config(self, config: Dict[str, Any]):
         """Save Hermes configuration."""
         if self.dry_run:
             self.logger.debug("Would save Hermes config")
             return
-        
+
+        config_path = HERMES_DIR / "config.yaml"
         try:
             import yaml
-            config_path = HERMES_DIR / "config.yaml"
-            with open(config_path, 'w') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-            self.logger.debug("Saved Hermes config")
         except ImportError:
-            self.logger.warn("PyYAML not installed, config not saved")
+            # Fallback: use built-in serializer
+            yaml_str = self._yaml_serialize(config)
+            with open(config_path, 'w', encoding='utf-8') as f:
+                f.write(yaml_str + "\n")
+        self.logger.success("Saved Hermes config.yaml")
     
     def get_available_agents(self, oc_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Get list of available agents from OpenClaw config."""
@@ -401,7 +505,7 @@ class OpenClawMigrator:
             result.warnings.append("SOUL.md not found")
             return result
         
-        with open(src) as f:
+        with open(src, encoding='utf-8') as f:
             content = f.read()
         
         migrated = f"""# Hermes Agent Persona
@@ -418,7 +522,7 @@ Agent: {self.agent_id or 'default'}
         if self.dry_run:
             self.logger.debug(f"Would migrate SOUL.md to {dst}")
         else:
-            with open(dst, 'w') as f:
+            with open(dst, 'w', encoding='utf-8') as f:
                 f.write(migrated)
             self.logger.success("Migrated SOUL.md (persona)")
         
@@ -434,7 +538,7 @@ Agent: {self.agent_id or 'default'}
         # MEMORY.md
         src = OPENCLAW_DIR / "workspace" / "MEMORY.md"
         if src.exists():
-            with open(src) as f:
+            with open(src, encoding='utf-8') as f:
                 content = f.read()
             
             dst = mem_dir / "MEMORY.md"
@@ -447,7 +551,7 @@ Agent: {self.agent_id or 'default'}
             if self.dry_run:
                 self.logger.debug(f"Would migrate MEMORY.md to {dst}")
             else:
-                with open(dst, 'w') as f:
+                with open(dst, 'w', encoding='utf-8') as f:
                     f.write(migrated)
                 self.logger.success("Migrated MEMORY.md")
             result.items_migrated.append("MEMORY.md")
@@ -467,7 +571,7 @@ Agent: {self.agent_id or 'default'}
             if self.dry_run:
                 self.logger.debug(f"Would migrate USER.md to {dst}")
             else:
-                with open(dst, 'w') as f:
+                with open(dst, 'w', encoding='utf-8') as f:
                     f.write(migrated)
                 self.logger.success("Migrated USER.md")
             result.items_migrated.append("USER.md")
@@ -591,10 +695,10 @@ Agent: {self.agent_id or 'default'}
         
         if model_config.get("primary"):
             primary = model_config["primary"]
-            
-            if "model" not in hermes_config:
+
+            if "model" not in hermes_config or not isinstance(hermes_config["model"], dict):
                 hermes_config["model"] = {}
-            
+
             hermes_config["model"]["default"] = primary
             
             if model_config.get("fallbacks"):
@@ -661,28 +765,877 @@ This file documents your setup for reference.
         
         if not self.dry_run:
             mem_dir = HERMES_DIR / "memories"
-            with open(mem_dir / "openclaw_agents.md", 'w') as f:
+            with open(mem_dir / "openclaw_agents.md", 'w', encoding='utf-8') as f:
                 f.write(doc)
         
         self.logger.success(f"Documented {len(agents_list)} agents, {len(bindings)} bindings")
         result.items_migrated.append("Multi-agent documentation")
         result.success = True
         return result
-    
+
+    def migrate_heartbeat(self) -> MigrationResult:
+        """Migrate HEARTBEAT.md."""
+        result = MigrationResult(success=False, message="HEARTBEAT.md migration")
+        src = OPENCLAW_DIR / "workspace" / "HEARTBEAT.md"
+        dst = HERMES_DIR / "memories" / "HEARTBEAT.md"
+
+        if not src.exists():
+            result.warnings.append("HEARTBEAT.md not found")
+            return result
+
+        with open(src, encoding='utf-8') as f:
+            content = f.read()
+
+        # Skip if file is empty or only comments
+        stripped = "\n".join(
+            line for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#") and not line.strip().startswith("<!--")
+        )
+
+        migrated = f"""# Heartbeat Tasks
+<!--
+Migrated from OpenClaw on {datetime.now().strftime('%Y-%m-%d %H:%M')}
+Agent: {self.agent_id or 'default'}
+-->
+
+{content}
+"""
+        if self.dry_run:
+            self.logger.debug(f"Would migrate HEARTBEAT.md to {dst}")
+        else:
+            with open(dst, 'w', encoding='utf-8') as f:
+                f.write(migrated)
+            self.logger.success("Migrated HEARTBEAT.md")
+
+        result.success = True
+        result.items_migrated.append("HEARTBEAT.md")
+        if not stripped:
+            result.warnings.append("HEARTBEAT.md was empty/comments-only")
+        return result
+
+    def migrate_env_template(self, oc_config: Dict[str, Any]) -> MigrationResult:
+        """Generate .env.openclaw with credential placeholders for detected services."""
+        result = MigrationResult(success=False, message="Environment template")
+        lines = [
+            f"# OpenClaw Migration - Credential Placeholders",
+            f"# Generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            f"# Agent: {self.agent_id or 'default'}",
+            f"#",
+            f"# Fill in values below then copy relevant lines to ~/.hermes/.env",
+            f"# Lines are commented out to prevent accidental sourcing",
+            "",
+        ]
+
+        channels = oc_config.get("channels", {})
+        items = []
+
+        # Telegram
+        tg = channels.get("telegram", {})
+        if tg.get("enabled") or tg.get("accounts"):
+            lines.append("# --Telegram--")
+            accounts = tg.get("accounts", {})
+            if accounts:
+                # If agent has a specific account, highlight it
+                if self.agent_id and self.agent_id in accounts:
+                    lines.append(f"# TELEGRAM_BOT_TOKEN=  # For agent '{self.agent_id}'")
+                else:
+                    for acct in accounts:
+                        lines.append(f"# TELEGRAM_BOT_TOKEN=  # Account: {acct}")
+            else:
+                lines.append("# TELEGRAM_BOT_TOKEN=")
+            # Allowed users
+            allow_from = oc_config.get("commands", {}).get("allowFrom", {}).get("telegram", [])
+            if allow_from:
+                lines.append(f"# TELEGRAM_ALLOWED_USERS={','.join(str(u) for u in allow_from)}")
+            lines.append("")
+            items.append("Telegram credentials")
+
+        # Slack
+        sl = channels.get("slack", {})
+        if sl.get("enabled"):
+            lines.append("# --Slack--")
+            lines.append("# SLACK_BOT_TOKEN=")
+            lines.append("# SLACK_APP_TOKEN=")
+            allow_from = oc_config.get("commands", {}).get("allowFrom", {}).get("slack", [])
+            if allow_from:
+                lines.append(f"# SLACK_ALLOWED_USERS={','.join(str(u) for u in allow_from)}")
+            lines.append("")
+            items.append("Slack credentials")
+
+        # WhatsApp
+        wa = channels.get("whatsapp", {})
+        if wa.get("enabled"):
+            lines.append("# --WhatsApp--")
+            lines.append("# WHATSAPP_ENABLED=true")
+            allow_from = wa.get("groupAllowFrom", [])
+            if allow_from:
+                lines.append(f"# WHATSAPP_ALLOWED_USERS={','.join(str(u) for u in allow_from)}")
+            lines.append("")
+            items.append("WhatsApp credentials")
+
+        # Discord
+        dc = channels.get("discord", {})
+        if dc.get("enabled"):
+            lines.append("# --Discord--")
+            lines.append("# DISCORD_BOT_TOKEN=")
+            lines.append("")
+            items.append("Discord credentials")
+
+        # Web search / tools
+        tools = oc_config.get("tools", {})
+        web = tools.get("web", {})
+        if web.get("search", {}).get("enabled") or web.get("search", {}).get("apiKey"):
+            lines.append("# --Web Tools--")
+            lines.append("# FIRECRAWL_API_KEY=  # Or equivalent web search API key")
+            lines.append("")
+            items.append("Web search API key")
+
+        # Memory search (embedding)
+        mem_search = oc_config.get("agents", {}).get("defaults", {}).get("memorySearch", {})
+        if mem_search.get("provider") == "gemini":
+            lines.append("# --Embedding / Memory Search--")
+            lines.append("# Note: OpenClaw used Gemini embedding (gemini-embedding-001)")
+            lines.append("# Hermes has built-in memory - this is for reference only")
+            lines.append("")
+            items.append("Memory search reference")
+
+        # Custom providers
+        providers = oc_config.get("models", {}).get("providers", {})
+        if providers:
+            lines.append("# --Custom Model Providers--")
+            for name, prov in providers.items():
+                base_url = prov.get("baseUrl", "")
+                lines.append(f"# Provider '{name}': {base_url}")
+            lines.append("# Set API keys for custom providers as needed")
+            lines.append("")
+            items.append("Custom provider references")
+
+        if not items:
+            result.message = "No credentials detected to template"
+            return result
+
+        env_content = "\n".join(lines) + "\n"
+        dst = HERMES_DIR / ".env.openclaw"
+
+        if self.dry_run:
+            self.logger.debug(f"Would write env template to {dst}")
+        else:
+            with open(dst, 'w', encoding='utf-8') as f:
+                f.write(env_content)
+            self.logger.success(f"Created credential template: .env.openclaw")
+
+        result.success = True
+        result.items_migrated = items
+        result.warnings.append("Fill in credentials in .env.openclaw, then copy to .env")
+        return result
+
+    def migrate_credentials(self, oc_config: Dict[str, Any]) -> MigrationResult:
+        """Copy actual credentials from OpenClaw to Hermes .env for working channels."""
+        result = MigrationResult(success=False, message="Credentials")
+        env_lines = [
+            f"# Migrated from OpenClaw on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            f"# Agent: {self.agent_id or 'default'}",
+            "",
+        ]
+        items = []
+
+        channels = oc_config.get("channels", {})
+
+        # Telegram - get the selected agent's bot token
+        tg = channels.get("telegram", {})
+        if tg.get("enabled") or tg.get("accounts"):
+            accounts = tg.get("accounts", {})
+            bot_token = None
+
+            # Priority: selected agent's account, then "default" account
+            if self.agent_id and self.agent_id in accounts:
+                bot_token = accounts[self.agent_id].get("botToken")
+            elif "default" in accounts:
+                bot_token = accounts["default"].get("botToken")
+            elif accounts:
+                # Take the first one
+                first_acct = next(iter(accounts.values()))
+                bot_token = first_acct.get("botToken")
+
+            # Also check top-level botToken (flat config)
+            if not bot_token:
+                bot_token = tg.get("botToken")
+
+            if bot_token:
+                env_lines.append(f"TELEGRAM_BOT_TOKEN={bot_token}")
+                items.append("Telegram bot token")
+
+            # Allowed users
+            allow_tg = oc_config.get("commands", {}).get("allowFrom", {}).get("telegram", [])
+            group_allow = tg.get("groupAllowFrom", [])
+            all_users = list(set(str(u) for u in (allow_tg + group_allow)))
+            if all_users:
+                env_lines.append(f"TELEGRAM_ALLOWED_USERS={','.join(all_users)}")
+                items.append("Telegram allowed users")
+
+            env_lines.append("")
+
+        # Slack
+        sl = channels.get("slack", {})
+        if sl.get("enabled") or sl.get("accounts"):
+            bot_token = sl.get("botToken")
+            app_token = sl.get("appToken")
+
+            # Check accounts structure (like Telegram)
+            sl_accounts = sl.get("accounts", {})
+            if not bot_token and sl_accounts:
+                if self.agent_id and self.agent_id in sl_accounts:
+                    bot_token = sl_accounts[self.agent_id].get("accessToken") or sl_accounts[self.agent_id].get("botToken")
+                elif "default" in sl_accounts:
+                    bot_token = sl_accounts["default"].get("accessToken") or sl_accounts["default"].get("botToken")
+                elif sl_accounts:
+                    first_acct = next(iter(sl_accounts.values()))
+                    bot_token = first_acct.get("accessToken") or first_acct.get("botToken")
+
+            if bot_token:
+                env_lines.append(f"SLACK_BOT_TOKEN={bot_token}")
+                items.append("Slack bot token")
+            if app_token:
+                env_lines.append(f"SLACK_APP_TOKEN={app_token}")
+                items.append("Slack app token")
+
+            allow_sl = oc_config.get("commands", {}).get("allowFrom", {}).get("slack", [])
+            if allow_sl:
+                env_lines.append(f"SLACK_ALLOWED_USERS={','.join(str(u) for u in allow_sl)}")
+
+            env_lines.append("")
+
+        # WhatsApp
+        wa = channels.get("whatsapp", {})
+        if wa.get("enabled"):
+            env_lines.append("WHATSAPP_ENABLED=true")
+            allow_wa = wa.get("groupAllowFrom", [])
+            if allow_wa:
+                env_lines.append(f"WHATSAPP_ALLOWED_USERS={','.join(str(u) for u in allow_wa)}")
+                items.append("WhatsApp config")
+            env_lines.append("")
+
+        # Discord
+        dc = channels.get("discord", {})
+        if dc.get("enabled"):
+            dc_token = dc.get("botToken")
+            if dc_token:
+                env_lines.append(f"DISCORD_BOT_TOKEN={dc_token}")
+                items.append("Discord bot token")
+            env_lines.append("")
+
+        # Web search API key
+        tools = oc_config.get("tools", {})
+        web_search = tools.get("web", {}).get("search", {})
+        if isinstance(web_search, dict) and web_search.get("apiKey"):
+            env_lines.append(f"FIRECRAWL_API_KEY={web_search['apiKey']}")
+            items.append("Web search API key")
+            env_lines.append("")
+
+        # Memory search API key (e.g., Gemini embedding)
+        mem_search = oc_config.get("agents", {}).get("defaults", {}).get("memorySearch", {})
+        mem_api_key = mem_search.get("remote", {}).get("apiKey")
+        if mem_api_key:
+            provider_name = mem_search.get("provider", "embedding").upper()
+            env_lines.append(f"# Memory search / embedding provider")
+            env_lines.append(f"{provider_name}_API_KEY={mem_api_key}")
+            items.append(f"{provider_name} API key (memory search)")
+            env_lines.append("")
+
+        # Gateway auth token
+        gw_token = oc_config.get("gateway", {}).get("auth", {}).get("token")
+        if gw_token:
+            env_lines.append(f"# Gateway auth (from OpenClaw)")
+            env_lines.append(f"GATEWAY_AUTH_TOKEN={gw_token}")
+            items.append("Gateway auth token")
+            env_lines.append("")
+
+        # Custom model provider API keys (from auth profiles or provider config)
+        providers = oc_config.get("models", {}).get("providers", {})
+        for name, prov in providers.items():
+            base_url = prov.get("baseUrl", "")
+            if base_url:
+                name_upper = name.upper().replace("-", "_").replace(".", "_")
+                env_lines.append(f"# Custom provider: {name}")
+                env_lines.append(f"{name_upper}_BASE_URL={base_url}")
+                api_key = prov.get("apiKey")
+                if api_key:
+                    env_lines.append(f"{name_upper}_API_KEY={api_key}")
+                    items.append(f"{name} API key")
+                env_lines.append("")
+
+        if not items:
+            result.message = "No credentials found to migrate"
+            result.success = True
+            return result
+
+        env_content = "\n".join(env_lines) + "\n"
+        dst = HERMES_DIR / ".env"
+
+        if self.dry_run:
+            self.logger.debug(f"Would write {len(items)} credentials to .env")
+        else:
+            # If .env exists, append our section
+            mode = 'a' if dst.exists() else 'w'
+            if mode == 'a':
+                env_content = "\n# --- OpenClaw Migration ---\n" + env_content
+
+            with open(dst, mode, encoding='utf-8') as f:
+                f.write(env_content)
+
+            # Set restrictive permissions (owner-only)
+            try:
+                os.chmod(dst, 0o600)
+            except OSError:
+                pass  # Windows doesn't support Unix permissions
+
+            self.logger.success(f"Wrote {len(items)} credentials to .env")
+
+        result.success = True
+        result.items_migrated = items
+        return result
+
+    def start_hermes(self) -> MigrationResult:
+        """Start Hermes after migration."""
+        result = MigrationResult(success=False, message="Start Hermes")
+
+        if self.dry_run:
+            self.logger.debug("Would start Hermes")
+            result.success = True
+            result.items_migrated.append("Hermes start (dry run)")
+            return result
+
+        # Check if hermes command is available
+        try:
+            version_check = subprocess.run(
+                ["hermes", "--version"],
+                capture_output=True, text=True, timeout=10
+            )
+            if version_check.returncode != 0:
+                result.warnings.append("Hermes CLI not in PATH. Start manually: hermes")
+                result.success = True
+                return result
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            result.warnings.append("Hermes CLI not found. Start manually after sourcing shell: source ~/.bashrc && hermes")
+            result.success = True
+            return result
+
+        # Start Hermes in the background
+        try:
+            self.logger.info("Starting Hermes...")
+            subprocess.Popen(
+                ["hermes"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            self.logger.success("Hermes started in background")
+            result.success = True
+            result.items_migrated.append("Hermes started")
+        except Exception as e:
+            self.logger.error(f"Failed to start Hermes: {e}")
+            result.warnings.append(f"Could not start Hermes: {e}. Start manually: hermes")
+            result.success = True
+
+        return result
+
+    def _parse_duration_to_minutes(self, duration_str: str) -> Optional[int]:
+        """Parse duration strings like '1h', '30m', '90s', '2h30m' to minutes."""
+        if not duration_str or not isinstance(duration_str, str):
+            return None
+
+        total_seconds = 0
+        matches = re.findall(r'(\d+)\s*([dhms])', duration_str.lower())
+        if not matches:
+            # Try bare number (assume minutes)
+            try:
+                return int(duration_str)
+            except ValueError:
+                return None
+
+        for value, unit in matches:
+            v = int(value)
+            if unit == 'd':
+                total_seconds += v * 86400
+            elif unit == 'h':
+                total_seconds += v * 3600
+            elif unit == 'm':
+                total_seconds += v * 60
+            elif unit == 's':
+                total_seconds += v
+
+        return max(1, total_seconds // 60)
+
+    def migrate_advanced_config(self, oc_config: Dict[str, Any], hermes_config: Dict[str, Any]) -> MigrationResult:
+        """Map advanced OpenClaw settings to Hermes config.yaml."""
+        result = MigrationResult(success=False, message="Advanced config")
+        defaults = oc_config.get("agents", {}).get("defaults", {})
+
+        # Compaction → Compression
+        compaction = defaults.get("compaction", {})
+        if compaction.get("mode"):
+            hermes_config.setdefault("compression", {})
+            hermes_config["compression"].setdefault("enabled", True)
+            result.items_migrated.append(f"compression (from compaction.{compaction['mode']})")
+            self.logger.debug(f"Mapped compaction.mode={compaction['mode']} -> compression.enabled=true")
+
+        # Context pruning → Compression threshold
+        pruning = defaults.get("contextPruning", {})
+        if pruning.get("mode") == "cache-ttl":
+            hermes_config.setdefault("compression", {})
+            hermes_config["compression"].setdefault("enabled", True)
+            ttl = pruning.get("ttl", "")
+            if ttl:
+                result.items_migrated.append(f"context pruning (ttl: {ttl})")
+
+        # maxConcurrent → code_execution.max_tool_calls
+        max_concurrent = defaults.get("maxConcurrent")
+        if max_concurrent:
+            hermes_config.setdefault("code_execution", {})
+            hermes_config["code_execution"].setdefault("max_tool_calls", max_concurrent * 10)
+            result.items_migrated.append(f"code_execution.max_tool_calls={max_concurrent * 10}")
+
+        # subagents.maxConcurrent → delegation.max_iterations
+        sub_max = defaults.get("subagents", {}).get("maxConcurrent")
+        if sub_max:
+            hermes_config.setdefault("delegation", {})
+            hermes_config["delegation"].setdefault("max_iterations", sub_max * 6)
+            result.items_migrated.append(f"delegation.max_iterations={sub_max * 6}")
+
+        # Session retention → session_reset
+        retention = oc_config.get("cron", {}).get("sessionRetention")
+        if retention:
+            minutes = self._parse_duration_to_minutes(retention)
+            if minutes:
+                hermes_config.setdefault("session_reset", {})
+                hermes_config["session_reset"].setdefault("mode", "idle")
+                hermes_config["session_reset"].setdefault("idle_minutes", minutes)
+                result.items_migrated.append(f"session_reset.idle_minutes={minutes}")
+
+        # Toolset enablement based on detected tools
+        tools = oc_config.get("tools", {})
+        if tools.get("web", {}).get("search") or tools.get("web", {}).get("fetch"):
+            hermes_config.setdefault("toolsets", ["all"])
+            result.items_migrated.append("web toolset detected")
+        if tools.get("agentToAgent", {}).get("enabled"):
+            hermes_config.setdefault("toolsets", ["all"])
+            result.items_migrated.append("delegation toolset detected")
+
+        # Document-only fields (no direct Hermes equivalent)
+        dm_scope = oc_config.get("session", {}).get("dmScope")
+        if dm_scope:
+            result.warnings.append(f"session.dmScope='{dm_scope}' has no direct Hermes equivalent")
+
+        heartbeat = defaults.get("heartbeat", {}).get("every")
+        if heartbeat:
+            result.warnings.append(f"heartbeat.every='{heartbeat}' has no direct Hermes equivalent")
+
+        maintenance = oc_config.get("session", {}).get("maintenance", {}).get("mode")
+        if maintenance:
+            result.warnings.append(f"session.maintenance.mode='{maintenance}' has no Hermes equivalent")
+
+        messages = oc_config.get("messages", {})
+        if messages.get("ackReactionScope"):
+            result.warnings.append(f"messages.ackReactionScope='{messages['ackReactionScope']}' is platform-specific")
+
+        result.success = bool(result.items_migrated)
+        if result.items_migrated:
+            self.logger.success(f"Mapped {len(result.items_migrated)} advanced settings")
+        return result
+
+    def migrate_channel_details(self, oc_config: Dict[str, Any]) -> MigrationResult:
+        """Create detailed channel migration documentation."""
+        result = MigrationResult(success=False, message="Channel details")
+        channels = oc_config.get("channels", {})
+
+        if not channels:
+            return result
+
+        doc = f"""# OpenClaw Channel Configuration Reference
+
+Migrated on {datetime.now().strftime('%Y-%m-%d %H:%M')}
+Agent: {self.agent_id or 'default'}
+
+This documents your OpenClaw channel setup for manual reconfiguration in Hermes.
+Credentials have been redacted - see .env.openclaw for placeholder list.
+
+"""
+
+        for channel_name, channel_config in channels.items():
+            safe_config = redact_sensitive_fields(channel_config)
+            doc += f"## {channel_name.title()}\n\n"
+            doc += f"- Enabled: {safe_config.get('enabled', 'unknown')}\n"
+
+            # Channel-specific details
+            if channel_name == "telegram":
+                doc += f"- Streaming: {safe_config.get('streaming', 'default')}\n"
+                doc += f"- DM Policy: {safe_config.get('dmPolicy', 'default')}\n"
+                doc += f"- Group Policy: {safe_config.get('groupPolicy', 'default')}\n"
+
+                accounts = safe_config.get("accounts", {})
+                if accounts:
+                    doc += f"\n### Accounts ({len(accounts)})\n\n"
+                    for acct_name, acct_config in accounts.items():
+                        is_selected = acct_name == self.agent_id
+                        marker = " **(SELECTED)**" if is_selected else ""
+                        doc += f"#### `{acct_name}`{marker}\n\n"
+                        doc += f"- DM Policy: {acct_config.get('dmPolicy', 'default')}\n"
+                        doc += f"- Streaming: {acct_config.get('streaming', 'default')}\n"
+                        doc += f"- Group Policy: {acct_config.get('groupPolicy', 'default')}\n"
+
+                        capabilities = acct_config.get("capabilities", {})
+                        if capabilities:
+                            doc += f"- Capabilities: {capabilities}\n"
+
+                        groups = acct_config.get("groups", {})
+                        if groups:
+                            doc += f"- Groups:\n"
+                            for gid, gconfig in groups.items():
+                                doc += f"  - `{gid}`: enabled={gconfig.get('enabled', True)}"
+                                doc += f", requireMention={gconfig.get('requireMention', True)}"
+                                doc += f", policy={gconfig.get('groupPolicy', 'default')}\n"
+
+                                topics = gconfig.get("topics", {})
+                                if topics:
+                                    for tid, tconfig in topics.items():
+                                        doc += f"    - Topic `{tid}`: enabled={tconfig.get('enabled', True)}"
+                                        doc += f", requireMention={tconfig.get('requireMention', True)}"
+                                        doc += f", policy={tconfig.get('groupPolicy', 'default')}\n"
+                        doc += "\n"
+
+            elif channel_name == "slack":
+                doc += f"- Mode: {safe_config.get('mode', 'default')}\n"
+                doc += f"- Block Streaming: {safe_config.get('blockStreaming', False)}\n"
+                doc += "\n"
+
+            elif channel_name == "whatsapp":
+                doc += f"- DM Policy: {safe_config.get('dmPolicy', 'default')}\n"
+                doc += f"- Self Chat Mode: {safe_config.get('selfChatMode', False)}\n"
+                doc += f"- Group Policy: {safe_config.get('groupPolicy', 'default')}\n"
+                doc += f"- Debounce (ms): {safe_config.get('debounceMs', 0)}\n"
+                doc += f"- Max Media Size (MB): {safe_config.get('mediaMaxMb', 'default')}\n"
+                doc += "\n"
+
+            elif channel_name == "discord":
+                doc += "\n"
+
+            else:
+                # Generic channel - document all non-sensitive fields
+                for key, val in safe_config.items():
+                    if key not in ("enabled",) and val != REDACT_VALUE:
+                        doc += f"- {key}: {val}\n"
+                doc += "\n"
+
+        doc += """## Manual Reconfiguration Required
+
+After migration, you need to:
+1. Set up bot tokens in ~/.hermes/.env (see .env.openclaw for reference)
+2. Configure group/topic routing in Hermes platform settings
+3. Re-pair with channels using `hermes setup`
+4. Test each channel independently
+"""
+
+        if not self.dry_run:
+            mem_dir = HERMES_DIR / "memories"
+            with open(mem_dir / "openclaw_channels.md", 'w', encoding='utf-8') as f:
+                f.write(doc)
+
+        self.logger.success(f"Documented {len(channels)} channel configurations")
+        result.success = True
+        result.items_migrated.append(f"{len(channels)} channel configs documented")
+        return result
+
+    def migrate_infrastructure(self, oc_config: Dict[str, Any]) -> MigrationResult:
+        """Document OpenClaw infrastructure config for reference."""
+        result = MigrationResult(success=False, message="Infrastructure docs")
+
+        doc = f"""# OpenClaw Infrastructure Reference
+
+Migrated on {datetime.now().strftime('%Y-%m-%d %H:%M')}
+Agent: {self.agent_id or 'default'}
+
+This documents your OpenClaw infrastructure settings for reference.
+Some have Hermes equivalents (noted), others are OpenClaw-specific.
+
+"""
+        sections = []
+
+        # Gateway
+        gateway = oc_config.get("gateway", {})
+        if gateway:
+            safe_gw = redact_sensitive_fields(gateway)
+            doc += "## Gateway\n\n"
+            doc += "Hermes has its own gateway - this is for reference.\n\n"
+            doc += f"- Port: {safe_gw.get('port', 'default')}\n"
+            doc += f"- Mode: {safe_gw.get('mode', 'default')}\n"
+            doc += f"- Bind: {safe_gw.get('bind', 'default')}\n"
+            ts = safe_gw.get("tailscale", {})
+            if ts:
+                doc += f"- Tailscale: mode={ts.get('mode', 'off')}\n"
+            deny = safe_gw.get("nodes", {}).get("denyCommands", [])
+            if deny:
+                doc += f"- Denied Commands: {deny}\n"
+            doc += "\n"
+            sections.append("Gateway")
+
+        # Custom Model Providers
+        providers = oc_config.get("models", {}).get("providers", {})
+        if providers:
+            doc += "## Custom Model Providers\n\n"
+            doc += "These may need manual setup in Hermes (.env or config.yaml).\n\n"
+            for name, prov in providers.items():
+                safe_prov = redact_sensitive_fields(prov)
+                doc += f"### {name}\n\n"
+                doc += f"- Base URL: {safe_prov.get('baseUrl', 'unknown')}\n"
+                doc += f"- API Type: {safe_prov.get('api', 'unknown')}\n"
+                models = safe_prov.get("models", [])
+                if models:
+                    doc += "- Models:\n"
+                    for m in models:
+                        doc += f"  - `{m.get('id', '?')}` ({m.get('name', '?')})"
+                        doc += f" - context: {m.get('contextWindow', '?')}, max tokens: {m.get('maxTokens', '?')}"
+                        if m.get("reasoning"):
+                            doc += " [reasoning]"
+                        doc += "\n"
+                doc += "\n"
+            sections.append("Custom providers")
+
+        # Hooks
+        hooks = oc_config.get("hooks", {})
+        if hooks:
+            doc += "## Hooks\n\n"
+            internal = hooks.get("internal", {})
+            if internal.get("enabled"):
+                doc += "Internal hooks were enabled:\n\n"
+                entries = internal.get("entries", {})
+                for hook_name, hook_config in entries.items():
+                    status = "enabled" if hook_config.get("enabled") else "disabled"
+                    doc += f"- `{hook_name}`: {status}\n"
+                doc += "\n"
+                doc += "Hermes equivalent: Place hook scripts in ~/.hermes/hooks/\n\n"
+            sections.append("Hooks")
+
+        # Plugins
+        plugins = oc_config.get("plugins", {})
+        if plugins:
+            entries = plugins.get("entries", {})
+            if entries:
+                doc += "## Plugins\n\n"
+                for plugin_name, plugin_config in entries.items():
+                    safe_pc = redact_sensitive_fields(plugin_config)
+                    status = "enabled" if safe_pc.get("enabled") else "disabled"
+                    doc += f"- `{plugin_name}`: {status}\n"
+                    config = safe_pc.get("config", {})
+                    if config:
+                        for k, v in config.items():
+                            doc += f"  - {k}: {v}\n"
+                doc += "\n"
+                sections.append("Plugins")
+
+        # Commands
+        commands = oc_config.get("commands", {})
+        if commands:
+            doc += "## Commands Configuration\n\n"
+            doc += f"- Native commands: {commands.get('native', 'auto')}\n"
+            doc += f"- Native skills: {commands.get('nativeSkills', 'auto')}\n"
+            doc += f"- Restart allowed: {commands.get('restart', False)}\n"
+            doc += f"- Owner display: {commands.get('ownerDisplay', 'default')}\n"
+            allow_from = commands.get("allowFrom", {})
+            if allow_from:
+                doc += "- Access control:\n"
+                for platform, users in allow_from.items():
+                    doc += f"  - {platform}: {users}\n"
+            doc += "\n"
+            sections.append("Commands")
+
+        # Tools
+        tools = oc_config.get("tools", {})
+        if tools:
+            doc += "## Tools Configuration\n\n"
+            web = tools.get("web", {})
+            if web:
+                doc += f"- Web search: {bool(web.get('search'))}\n"
+                doc += f"- Web fetch: {bool(web.get('fetch'))}\n"
+            sessions = tools.get("sessions", {})
+            if sessions:
+                doc += f"- Sessions visibility: {sessions.get('visibility', 'default')}\n"
+            a2a = tools.get("agentToAgent", {})
+            if a2a:
+                doc += f"- Agent-to-agent: {a2a.get('enabled', False)}\n"
+            doc += "\nHermes equivalent: Configure toolsets in config.yaml\n\n"
+            sections.append("Tools")
+
+        # Cron
+        cron = oc_config.get("cron", {})
+        if cron:
+            doc += "## Cron / Scheduled Tasks\n\n"
+            doc += f"- Session retention: {cron.get('sessionRetention', 'default')}\n"
+            jobs = cron.get("jobs", [])
+            if jobs:
+                doc += "- Scheduled jobs:\n"
+                for job in jobs:
+                    doc += f"  - {job}\n"
+            doc += "\nHermes equivalent: Place cron YAML files in ~/.hermes/cron/\n\n"
+            sections.append("Cron")
+
+        # Skills install config
+        skills = oc_config.get("skills", {})
+        if skills:
+            doc += "## Skills Configuration\n\n"
+            doc += f"- Node manager: {skills.get('install', {}).get('nodeManager', 'default')}\n"
+            doc += "\n"
+            sections.append("Skills")
+
+        # Update preferences
+        update = oc_config.get("update", {})
+        if update:
+            doc += "## Update Preferences\n\n"
+            doc += f"- Channel: {update.get('channel', 'stable')}\n"
+            auto = update.get("auto", {})
+            if auto:
+                doc += f"- Auto-update: {auto.get('enabled', False)}\n"
+            doc += "\n"
+            sections.append("Update prefs")
+
+        # Session config
+        session = oc_config.get("session", {})
+        if session:
+            doc += "## Session Configuration\n\n"
+            doc += f"- DM scope: {session.get('dmScope', 'default')}\n"
+            maint = session.get("maintenance", {})
+            if maint:
+                doc += f"- Maintenance mode: {maint.get('mode', 'off')}\n"
+            doc += "\n"
+            sections.append("Session")
+
+        # Messages config
+        messages = oc_config.get("messages", {})
+        if messages:
+            doc += "## Messages Configuration\n\n"
+            for k, v in messages.items():
+                doc += f"- {k}: {v}\n"
+            doc += "\n"
+            sections.append("Messages")
+
+        if not sections:
+            result.message = "No infrastructure config found"
+            return result
+
+        if not self.dry_run:
+            mem_dir = HERMES_DIR / "memories"
+            with open(mem_dir / "openclaw_infrastructure.md", 'w', encoding='utf-8') as f:
+                f.write(doc)
+
+        self.logger.success(f"Documented {len(sections)} infrastructure sections")
+        result.success = True
+        result.items_migrated = sections
+        return result
+
+    def stop_openclaw(self, oc_config: Dict[str, Any]) -> MigrationResult:
+        """Stop OpenClaw gateway and main process."""
+        result = MigrationResult(success=False, message="Stop OpenClaw")
+
+        if self.dry_run:
+            self.logger.debug("Would stop OpenClaw processes")
+            result.success = True
+            result.items_migrated.append("OpenClaw stop (dry run)")
+            return result
+
+        stopped = []
+
+        # Try graceful stop via gateway API
+        gateway = oc_config.get("gateway", {})
+        port = gateway.get("port")
+        if port:
+            self.logger.info(f"Stopping OpenClaw gateway on port {port}...")
+
+        # Find and kill openclaw processes
+        try:
+            # Find PIDs of openclaw processes
+            ps_result = subprocess.run(
+                ["pgrep", "-f", "openclaw"],
+                capture_output=True, text=True, timeout=5
+            )
+            if ps_result.returncode == 0:
+                pids = ps_result.stdout.strip().split("\n")
+                pids = [p.strip() for p in pids if p.strip()]
+
+                # Filter out our own migration process
+                our_pid = str(os.getpid())
+                pids = [p for p in pids if p != our_pid]
+
+                if pids:
+                    # SIGTERM first (graceful)
+                    for pid in pids:
+                        try:
+                            os.kill(int(pid), 15)  # SIGTERM
+                            stopped.append(pid)
+                        except (ProcessLookupError, PermissionError):
+                            pass
+
+                    if stopped:
+                        self.logger.info(f"Sent SIGTERM to {len(stopped)} OpenClaw process(es)")
+
+                        # Wait briefly for graceful shutdown
+                        import time
+                        time.sleep(2)
+
+                        # Check if any are still running
+                        still_running = []
+                        for pid in stopped:
+                            try:
+                                os.kill(int(pid), 0)  # Check if alive
+                                still_running.append(pid)
+                            except ProcessLookupError:
+                                pass
+
+                        if still_running:
+                            self.logger.warn(f"{len(still_running)} process(es) still running, sending SIGKILL")
+                            for pid in still_running:
+                                try:
+                                    os.kill(int(pid), 9)  # SIGKILL
+                                except (ProcessLookupError, PermissionError):
+                                    pass
+                else:
+                    self.logger.info("No OpenClaw processes found")
+            else:
+                self.logger.info("No OpenClaw processes found")
+
+        except FileNotFoundError:
+            # pgrep not available (e.g. Windows) - try port-based detection
+            if port:
+                self.logger.warn(f"Cannot detect processes (pgrep not found). "
+                                 f"Manually stop OpenClaw on port {port}")
+                result.warnings.append(f"Could not auto-stop OpenClaw. Stop it manually (port {port})")
+                result.success = True
+                return result
+        except Exception as e:
+            self.logger.warn(f"Error stopping OpenClaw: {e}")
+            result.warnings.append(f"Could not auto-stop OpenClaw: {e}")
+
+        if stopped:
+            self.logger.success(f"Stopped {len(stopped)} OpenClaw process(es)")
+            result.items_migrated.append(f"{len(stopped)} process(es) stopped")
+        else:
+            result.items_migrated.append("No processes to stop")
+
+        result.success = True
+        return result
+
     def run(self) -> bool:
         """Run the full migration."""
         print("\n  OpenClaw  Hermes Migration Tool")
         print("  " + "-" * 38)
-        
+
         # Check OpenClaw exists
         if not OPENCLAW_DIR.exists():
             self.logger.error(f"OpenClaw directory not found: {OPENCLAW_DIR}")
             return False
         
-        # Ensure Hermes is installed
+        # Ensure Hermes is installed (auto-install if needed)
         installer = HermesInstaller(self.logger)
-        if not installer.ensure_hermes_installed():
-            self.logger.error("Hermes installation required. Please install Hermes first.")
+        if not installer.ensure_hermes_installed(auto_install=True):
+            self.logger.error("Hermes installation required. Run: curl -fsSL https://raw.githubusercontent.com/nousresearch/hermes/main/install.sh | bash")
             return False
         
         # Setup Hermes directory
@@ -702,23 +1655,42 @@ This file documents your setup for reference.
             if not self.agent_id:
                 return False
         
+        # Stop OpenClaw before migrating
+        self.results.append(self.stop_openclaw(oc_config))
+
         hermes_config = self._load_hermes_config()
-        
-        # Run migrations
+
+        # Run migrations - workspace files
         self.results.append(self.migrate_soul())
         self.results.append(self.migrate_memory())
         self.results.append(self.migrate_workspace_files())
+        self.results.append(self.migrate_heartbeat())
+
+        # Run migrations - config and channels
         self.results.append(self.migrate_channels(oc_config, hermes_config))
         self.results.append(self.migrate_models(oc_config, hermes_config))
         self.results.append(self.migrate_agents(oc_config))
-        
-        # Save Hermes config
+        self.results.append(self.migrate_advanced_config(oc_config, hermes_config))
+
+        # Run migrations - documentation and templates
+        self.results.append(self.migrate_env_template(oc_config))
+        self.results.append(self.migrate_channel_details(oc_config))
+        self.results.append(self.migrate_infrastructure(oc_config))
+
+        # Migrate actual credentials to .env
+        self.results.append(self.migrate_credentials(oc_config))
+
+        # Save Hermes config (after all config mutations)
         if not self.dry_run:
             self._save_hermes_config(hermes_config)
-        
+
         # Print summary
         self._print_summary()
-        
+
+        # Start Hermes
+        if self.auto_start:
+            self.results.append(self.start_hermes())
+
         return all(r.success or not r.items_migrated for r in self.results)
     
     def _print_summary(self):
@@ -744,9 +1716,10 @@ This file documents your setup for reference.
         print("\n  " + "-" * 50)
         print("  NEXT STEPS:")
         print("  " + "-" * 50)
-        print("    1. Review ~/.hermes/SOUL.md (your persona)")
-        print("    2. Check ~/.hermes/memories/ for migrated memories")
-        print("    3. Re-authenticate with channels (Slack, Discord, etc.)")
-        print("    4. Verify model settings in ~/.hermes/config.yaml")
-        print("    5. Run 'hermes' to test the migrated setup")
+        print("    1. Hermes should be starting automatically")
+        print("    2. Test your channels (Telegram, Slack, etc.)")
+        print("    3. Review ~/.hermes/SOUL.md if you want to adjust persona")
+        print("    4. Check ~/.hermes/memories/ for migrated files")
+        print("    5. Verify ~/.hermes/config.yaml and ~/.hermes/.env")
+        print("    6. See memories/openclaw_channels.md for channel details")
         print("  " + "=" * 50 + "\n")

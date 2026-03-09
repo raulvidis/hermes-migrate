@@ -2,72 +2,69 @@
 
 ## What This Project Is
 
-A CLI migration tool that converts an **OpenClaw** AI agent setup (`~/.openclaw/`) to a **Hermes** AI agent setup (`~/.hermes/`). It's a one-shot utility: run it once, and your agent persona, memories, channel bindings, and model config move over.
+End-to-end CLI migration tool: OpenClaw (`~/.openclaw/`) to Hermes (`~/.hermes/`). Stops OpenClaw, migrates everything (files, config, credentials), starts Hermes. Channels keep working after migration.
 
 ## Architecture
 
 ```
 openclaw_to_hermes/
-  __init__.py        # Package init, version = "1.0.0"
-  cli.py             # argparse CLI entry point (main())
-  migrate.py         # All migration logic (782 lines)
+  __init__.py        # Package version
+  cli.py             # argparse CLI entry point
+  migrate.py         # All migration logic (~1700 lines)
+tests/
+  conftest.py        # Shared fixtures (sample configs, tmp dirs)
+  test_cli.py        # CLI argument parsing tests
+  test_migrate.py    # Migration logic tests (90+ tests)
+  test_security.py   # Redaction and security tests
 ```
 
-**Entry point:** `openclaw_to_hermes.cli:main`
+Entry point: `openclaw_to_hermes.cli:main`
 
-### Key Classes (migrate.py)
+## Key Classes (migrate.py)
 
-- `OpenClawMigrator` - Orchestrates the full migration pipeline
-- `HermesInstaller` - Detects/installs Hermes via official NousResearch installer
-- `MigrationLogger` - Console logger with automatic secret redaction
-- `MigrationResult` - Dataclass tracking success/warnings/errors per step
+- `OpenClawMigrator` — orchestrates the 14-step pipeline
+- `HermesInstaller` — detects/installs Hermes via official NousResearch installer
+- `MigrationLogger` — console output with automatic secret redaction
+- `MigrationResult` — dataclass tracking success/warnings/errors per step
 
-### Migration Pipeline (sequential)
+## Migration Pipeline
 
-1. `migrate_soul()` - Copy SOUL.md (persona file)
-2. `migrate_memory()` - Copy MEMORY.md, USER.md, archive daily memories
-3. `migrate_workspace_files()` - Copy IDENTITY.md, AGENTS.md, TOOLS.md
-4. `migrate_channels()` - Map channel bindings to Hermes platform_toolsets
-5. `migrate_models()` - Carry over model config (primary + fallbacks)
-6. `migrate_agents()` - Document multi-agent setup in markdown
+1. `stop_openclaw()` — kill OpenClaw processes (pgrep + SIGTERM/SIGKILL)
+2. `migrate_soul()` — SOUL.md persona file
+3. `migrate_memory()` — MEMORY.md, USER.md, archive daily memories
+4. `migrate_workspace_files()` — IDENTITY.md, AGENTS.md, TOOLS.md
+5. `migrate_heartbeat()` — HEARTBEAT.md periodic tasks
+6. `migrate_channels()` — map bindings to Hermes platform_toolsets in config.yaml
+7. `migrate_models()` — primary model + fallbacks to config.yaml
+8. `migrate_agents()` — document multi-agent setup in markdown
+9. `migrate_advanced_config()` — compaction, concurrency, session, cron to config.yaml
+10. `migrate_env_template()` — .env.openclaw with commented placeholders
+11. `migrate_channel_details()` — per-channel account docs (redacted)
+12. `migrate_infrastructure()` — gateway, hooks, plugins, providers docs
+13. `migrate_credentials()` — real tokens/keys to ~/.hermes/.env (chmod 600)
+14. `start_hermes()` — launch Hermes in background
 
-### File Paths
+## Key Design Decisions
 
-- OpenClaw source: `~/.openclaw/` (config in `openclaw.json`)
-- Hermes target: `~/.hermes/` (config in `config.yaml`)
-- Backups: `~/.hermes/backup_YYYYMMDD_HHMMSS/`
+- **Credentials ARE copied** to `.env` — the goal is working channels post-migration
+- **Log output is redacted** — MigrationLogger scrubs tokens/keys from all console output
+- **Documentation files are redacted** — `redact_sensitive_fields()` on all markdown reference docs
+- **YAML fallback** — `_yaml_serialize()` / `_basic_yaml_load()` when pyyaml is missing
+- **`_basic_yaml_load` returns `{}` for nested YAML** — can't parse it, so start fresh
+- **`setdefault` pattern** for config.yaml to avoid overwriting existing Hermes values
+- **All `open()` calls use `encoding='utf-8'`** for Windows compatibility
+- **`SAFE_FIELD_ALLOWLIST`** prevents false positives (maxTokens, contextWindow matched "token")
 
-## Security Model
-
-**Credentials are NEVER copied.** The tool:
-- Skips any config field matching: token, api_key, secret, password, credential, auth, bot_token, access_token, private_key
-- Redacts sensitive patterns in all log output (Telegram tokens, OpenAI keys, Slack tokens, Google API keys)
-- Warns users to re-authenticate channels post-migration
-
-## Dependencies
-
-- `pyyaml>=6.0` - Read/write Hermes config.yaml
-
-## Development Commands
+## Development
 
 ```bash
-pip install -e ".[dev]"   # Install with dev deps
-pytest                     # Run tests
-black openclaw_to_hermes/  # Format code
-ruff check .               # Lint
+pip install -e ".[dev]"
+pytest -v                          # 107 tests
+black openclaw_to_hermes/ tests/   # format
+ruff check .                       # lint
 ```
 
-## CLI Usage
+## CI/CD
 
-```bash
-openclaw-to-hermes                    # Interactive migration
-openclaw-to-hermes --agent cleo       # Migrate specific agent
-openclaw-to-hermes --dry-run          # Preview only
-openclaw-to-hermes --dry-run -v       # Preview with debug output
-openclaw-to-hermes --install-hermes   # Auto-install Hermes if missing
-```
-
-## Notes
-
-- Python 3.9+ required
-- Tests in `tests/` covering security, migration logic, and CLI
+- `.github/workflows/ci.yml` — tests on Python 3.9/3.11/3.12/3.13 x Linux/macOS/Windows
+- `.github/workflows/publish.yml` — publish to PyPI on GitHub release (trusted publisher)

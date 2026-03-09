@@ -35,6 +35,13 @@ class TestIsSensitiveField:
         assert is_sensitive_field("workspace") is False
         assert is_sensitive_field("id") is False
 
+    def test_allowlisted_fields_not_sensitive(self):
+        assert is_sensitive_field("maxTokens") is False
+        assert is_sensitive_field("max_tokens") is False
+        assert is_sensitive_field("contextTokens") is False
+        assert is_sensitive_field("contextWindow") is False
+        assert is_sensitive_field("totalTokens") is False
+
     def test_auth_pattern_matches(self):
         assert is_sensitive_field("auth") is True
         assert is_sensitive_field("authHeader") is True
