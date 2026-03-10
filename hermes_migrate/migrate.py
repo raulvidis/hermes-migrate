@@ -689,6 +689,11 @@ class OpenClawMigrator:
         with open(src, encoding="utf-8") as f:
             content = f.read()
 
+        # Replace OpenClaw references with Hermes
+        content = content.replace("OpenClaw", "Hermes")
+        content = content.replace("openclaw", "hermes")
+        content = content.replace("OPENCLAW", "HERMES")
+
         migrated = f"""# Hermes Agent Persona
 
 <!--
@@ -722,8 +727,13 @@ Agent: {self.agent_id or 'default'}
             with open(src, encoding="utf-8") as f:
                 content = f.read()
 
+            # Replace OpenClaw references
+            content = content.replace("OpenClaw", "Hermes")
+            content = content.replace("openclaw", "hermes")
+            content = content.replace("OPENCLAW", "HERMES")
+
             dst = mem_dir / "MEMORY.md"
-            migrated = f"""Migrated from OpenClaw on {datetime.now().strftime('%Y-%m-%d %H:%M')}
+            migrated = f"""Migrated from Hermes on {datetime.now().strftime('%Y-%m-%d %H:%M')}
 Source: ~/.openclaw/workspace/MEMORY.md
 Agent: {self.agent_id or 'default'}
 
