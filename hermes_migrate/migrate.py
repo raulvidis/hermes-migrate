@@ -619,6 +619,10 @@ class OpenClawMigrator:
             # No bindings — fall back to all enabled channels if agent exists
             agent_list = oc_config.get("agents", {}).get("list", [])
             agent_exists = any(a.get("id") == agent_id for a in agent_list)
+            # Also treat as existing if it's the default/synthetic agent
+            if not agent_exists and agent_id == "main":
+                if oc_config.get("agents", {}).get("defaults"):
+                    agent_exists = True
             if agent_exists:
                 for name, config in channels.items():
                     if config.get("enabled", False):
