@@ -596,24 +596,33 @@ class OpenClawMigrator:
         channels = oc_config.get("channels", {})
         agent_channels = {}
 
-        for binding in bindings:
-            channel = binding["channel"]
-            account_id = binding["account_id"]
+        if bindings:
+            for binding in bindings:
+                channel = binding["channel"]
+                account_id = binding["account_id"]
 
-            if channel in channels:
-                channel_config = channels[channel]
+                if channel in channels:
+                    channel_config = channels[channel]
 
-                if "accounts" in channel_config:
-                    accounts = channel_config.get("accounts", {})
-                    if account_id in accounts:
+                    if "accounts" in channel_config and channel_config["accounts"]:
+                        accounts = channel_config.get("accounts", {})
+                        if account_id in accounts:
+                            agent_channels[channel] = {
+                                "enabled": True,
+                                "account": account_id,
+                            }
+                    else:
                         agent_channels[channel] = {
-                            "enabled": True,
-                            "account": account_id,
+                            "enabled": channel_config.get("enabled", True),
                         }
-                else:
-                    agent_channels[channel] = {
-                        "enabled": channel_config.get("enabled", True),
-                    }
+        else:
+            # No bindings — fall back to all enabled channels if agent exists
+            agent_list = oc_config.get("agents", {}).get("list", [])
+            agent_exists = any(a.get("id") == agent_id for a in agent_list)
+            if agent_exists:
+                for name, config in channels.items():
+                    if config.get("enabled", False):
+                        agent_channels[name] = {"enabled": True}
 
         return agent_channels
 
@@ -1931,6 +1940,30 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
 
         stopped = []
 
+        # Stop systemd user service if it exists (prevents respawning)
+        try:
+            svc_check = subprocess.run(
+                ["systemctl", "--user", "is-active", "openclaw-gateway"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if svc_check.stdout.strip() == "active":
+                self.logger.info("Stopping openclaw-gateway systemd service...")
+                subprocess.run(
+                    ["systemctl", "--user", "stop", "openclaw-gateway"],
+                    capture_output=True,
+                    timeout=10,
+                )
+                subprocess.run(
+                    ["systemctl", "--user", "disable", "openclaw-gateway"],
+                    capture_output=True,
+                    timeout=10,
+                )
+                stopped.append("systemd:openclaw-gateway")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
         # Try graceful stop via gateway API
         gateway = oc_config.get("gateway", {})
         port = gateway.get("port")
@@ -2169,13 +2202,6 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
                 ],
             ),
             (
-                "Agents",
-                "Document multi-agent setup",
-                [
-                    lambda: self.migrate_agents(oc_config),
-                ],
-            ),
-            (
                 "Advanced Config",
                 "Migrate compaction, concurrency, session settings",
                 [
@@ -2192,8 +2218,9 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
             ),
             (
                 "Documentation",
-                "Generate reference docs for channels and infrastructure",
+                "Generate reference docs for agents, channels, and infrastructure",
                 [
+                    lambda: self.migrate_agents(oc_config),
                     lambda: self.migrate_channel_details(oc_config),
                     lambda: self.migrate_infrastructure(oc_config),
                 ],
