@@ -2094,6 +2094,12 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
                     timeout=10,
                 )
                 stopped.append("systemd:openclaw-gateway")
+                self.logger.info(
+                    "To restart OpenClaw later:\n"
+                    "           systemctl --user start openclaw-gateway\n"
+                    "         If you get 'is-enabled unavailable', run first:\n"
+                    "           systemctl --user enable openclaw-gateway"
+                )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
