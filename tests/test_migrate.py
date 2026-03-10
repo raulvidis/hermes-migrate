@@ -608,8 +608,6 @@ class TestStopOpenClaw:
         def fake_kill(pid, sig):
             killed_pids.append((pid, sig))
 
-        import time
-
         with (
             patch("subprocess.run", side_effect=fake_pgrep),
             patch("os.kill", side_effect=fake_kill),
@@ -651,9 +649,9 @@ class TestStopOpenClaw:
             result = migrator.stop_openclaw(sample_openclaw_config)
 
         assert result.success is True
-        assert int(gateway_pid) in [pid for pid, _ in killed_pids], (
-            "openclaw-gateway was not killed when it was the only openclaw process"
-        )
+        assert int(gateway_pid) in [
+            pid for pid, _ in killed_pids
+        ], "openclaw-gateway was not killed when it was the only openclaw process"
 
 
 class TestMigrateCredentials:
