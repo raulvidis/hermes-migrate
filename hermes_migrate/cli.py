@@ -72,6 +72,7 @@ Examples:
   hermes-migrate --force      Re-run migration (overwrite previous)
   hermes-migrate -q           Quiet mode for CI/scripting
   hermes-migrate -v           Verbose output
+  hermes-migrate --restart-openclaw  Re-enable and start OpenClaw gateway
 
 For more info: https://github.com/raulvidis/hermes-migrate
         """,
@@ -123,12 +124,47 @@ For more info: https://github.com/raulvidis/hermes-migrate
     )
 
     parser.add_argument(
+        "--restart-openclaw",
+        action="store_true",
+        help="Re-enable and start the OpenClaw gateway systemd service",
+    )
+
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
     )
 
     args = parser.parse_args()
+
+    # Handle --restart-openclaw as a standalone command
+    if args.restart_openclaw:
+        import subprocess
+
+        try:
+            subprocess.run(
+                ["systemctl", "--user", "enable", "openclaw-gateway"],
+                capture_output=True,
+                timeout=10,
+            )
+            result = subprocess.run(
+                ["systemctl", "--user", "start", "openclaw-gateway"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                print("  OpenClaw gateway started successfully.")
+            else:
+                print(f"  Failed to start OpenClaw gateway: {result.stderr.strip()}")
+                sys.exit(1)
+        except FileNotFoundError:
+            print("  systemctl not found — systemd is not available on this system.")
+            sys.exit(1)
+        except subprocess.TimeoutExpired:
+            print("  Timed out waiting for systemctl.")
+            sys.exit(1)
+        sys.exit(0)
 
     # Check for OpenClaw installation
     if not OPENCLAW_DIR.exists():
