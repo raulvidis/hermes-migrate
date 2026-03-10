@@ -869,6 +869,52 @@ Agent: {self.agent_id or 'default'}
         )
         self.logger.warn("NOTE: Verify channel tokens in ~/.hermes/.env after migration")
 
+        # Install channel-specific Python dependencies if Hermes venv exists
+        channel_deps = {
+            "slack": "slack-bolt",
+            "discord": "discord.py",
+            "telegram": "python-telegram-bot",
+            "whatsapp": "baileys",
+        }
+        venv_pip = HERMES_DIR / "hermes-agent" / "venv" / "bin" / "python"
+        if venv_pip.exists() and not self.dry_run:
+            for ch in enabled_channels:
+                dep = channel_deps.get(ch)
+                if dep:
+                    try:
+                        # Check if already installed
+                        check = subprocess.run(
+                            [str(venv_pip), "-c", f"import {dep.replace('-', '_').split('.')[0]}"],
+                            capture_output=True,
+                            timeout=10,
+                        )
+                        if check.returncode != 0:
+                            self.logger.info(f"Installing {dep} for {ch} channel...")
+                            # Try uv first, fall back to pip
+                            uv_result = subprocess.run(
+                                [
+                                    "uv",
+                                    "pip",
+                                    "install",
+                                    dep,
+                                    "--python",
+                                    str(venv_pip),
+                                ],
+                                capture_output=True,
+                                text=True,
+                                timeout=120,
+                            )
+                            if uv_result.returncode == 0:
+                                self.logger.success(f"Installed {dep}")
+                            else:
+                                result.warnings.append(
+                                    f"Could not install {dep} for {ch} — "
+                                    f"run manually: uv pip install {dep} "
+                                    f"--python ~/.hermes/hermes-agent/venv/bin/python"
+                                )
+                    except (FileNotFoundError, subprocess.TimeoutExpired):
+                        pass
+
         result.success = True
         return result
 
