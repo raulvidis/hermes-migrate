@@ -141,7 +141,9 @@ For more info: https://github.com/raulvidis/hermes-migrate
     installer = HermesInstaller(logger)
 
     if not installer.is_hermes_installed() and not installer.is_hermes_dir_exists():
-        if args.no_install:
+        if args.dry_run:
+            logger.info("Hermes not installed (dry run — skipping install)")
+        elif args.no_install:
             print(f"\n  Hermes not found at {HERMES_DIR}")
             print("  Remove --no-install to auto-install, or install manually.\n")
             sys.exit(1)

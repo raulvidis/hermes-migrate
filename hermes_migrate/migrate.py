@@ -939,10 +939,12 @@ Agent: {self.agent_id or 'default'}
         if model_config.get("primary"):
             primary = model_config["primary"]
 
-            # Check if the model is from an unsupported provider
+            # Check if the primary model is from an unsupported provider
+            primary_unsupported = False
             primary_lower = primary.lower()
             for prefix, provider_name in UNSUPPORTED_MODEL_PREFIXES.items():
                 if primary_lower.startswith(prefix):
+                    primary_unsupported = True
                     self.logger.warn(
                         f"Model '{primary}' ({provider_name}) is not"
                         f" directly supported by Hermes.\n"
@@ -954,6 +956,45 @@ Agent: {self.agent_id or 'default'}
                         f"Model '{primary}' ({provider_name}) not directly supported by Hermes"
                     )
                     break
+
+            # If primary is unsupported, try to find a supported model
+            # from fallbacks, defaults fallbacks, or other agents' models
+            if primary_unsupported:
+                all_candidates = list(model_config.get("fallbacks", []))
+                # Also check defaults fallbacks if not already included
+                defaults_fb = (
+                    oc_config.get("agents", {})
+                    .get("defaults", {})
+                    .get("model", {})
+                    .get("fallbacks", [])
+                )
+                for fb in defaults_fb:
+                    if fb not in all_candidates:
+                        all_candidates.append(fb)
+                # Check other agents' models as candidates
+                for agent in oc_config.get("agents", {}).get("list", []):
+                    agent_model = agent.get("model", "")
+                    if agent_model and agent_model != primary:
+                        if agent_model not in all_candidates:
+                            all_candidates.append(agent_model)
+
+                for candidate in all_candidates:
+                    c_lower = candidate.lower()
+                    is_unsupported = any(c_lower.startswith(p) for p in UNSUPPORTED_MODEL_PREFIXES)
+                    if not is_unsupported:
+                        self.logger.info(
+                            f"Switching default model from '{primary}'"
+                            f" to supported model '{candidate}'"
+                        )
+                        primary = candidate
+                        primary_unsupported = False
+                        break
+
+                if primary_unsupported:
+                    self.logger.warn(
+                        "No supported fallback model found."
+                        " Hermes may fail to start with this model."
+                    )
 
             if "model" not in hermes_config or not isinstance(hermes_config["model"], dict):
                 hermes_config["model"] = {}
@@ -981,6 +1022,9 @@ Agent: {self.agent_id or 'default'}
                     if is_unsupported:
                         self.logger.debug(f"Skipping unsupported fallback: {fb}")
                     else:
+                        # Strip provider prefix from fallbacks too
+                        if "/" in fb:
+                            fb = fb.split("/", 1)[1]
                         supported.append(fb)
                 if supported:
                     hermes_config["model"]["fallbacks"] = supported

@@ -186,13 +186,16 @@ class TestMigrateModels:
         hermes_config = {}
         result = migrator.migrate_models(sample_openclaw_config, hermes_config)
         assert result.success is True
-        assert hermes_config["model"]["default"] == "claude-haiku-4-5"
+        # Primary is anthropic/claude-haiku-4-5 (unsupported), so it falls back
+        # to first supported model: openai/gpt-4o from defaults fallbacks -> gpt-4o
+        assert hermes_config["model"]["default"] == "gpt-4o"
 
     def test_fallback_to_defaults(self, single_agent_config):
         migrator = OpenClawMigrator(dry_run=True, agent_id="main")
         hermes_config = {}
         result = migrator.migrate_models(single_agent_config, hermes_config)
         assert result.success is True
+        # No fallbacks available, so unsupported model stays (with prefix stripped)
         assert hermes_config["model"]["default"] == "claude-sonnet-4-20250514"
 
     def test_custom_provider_warning(self, sample_openclaw_config):
