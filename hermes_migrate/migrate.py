@@ -1243,9 +1243,24 @@ Agent: {self.agent_id or 'default'}
                 env_lines.append(f"SLACK_APP_TOKEN={app_token}")
                 items.append("Slack app token")
 
+            # Check multiple sources for allowed Slack users
             allow_sl = oc_config.get("commands", {}).get("allowFrom", {}).get("slack", [])
+            if not allow_sl:
+                # Check credentials/slack-*-allowFrom.json files
+                cred_dir = OPENCLAW_DIR / "credentials"
+                if cred_dir.exists():
+                    for af in cred_dir.glob("slack-*-allowFrom.json"):
+                        try:
+                            with open(af, encoding="utf-8") as f:
+                                af_data = json.load(f)
+                            allow_sl = af_data.get("allowFrom", [])
+                            if allow_sl:
+                                break
+                        except (json.JSONDecodeError, OSError):
+                            pass
             if allow_sl:
                 env_lines.append(f"SLACK_ALLOWED_USERS={','.join(str(u) for u in allow_sl)}")
+                items.append("Slack allowed users")
 
             env_lines.append("")
 
