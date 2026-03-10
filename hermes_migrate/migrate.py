@@ -2026,11 +2026,6 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
                     capture_output=True,
                     timeout=10,
                 )
-                subprocess.run(
-                    ["systemctl", "--user", "disable", "openclaw-gateway"],
-                    capture_output=True,
-                    timeout=10,
-                )
                 stopped.append("systemd:openclaw-gateway")
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
