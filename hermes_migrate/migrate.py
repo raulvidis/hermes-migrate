@@ -818,11 +818,9 @@ Agent: {self.agent_id or 'default'}
 
         if self.agent_id:
             agent_channels = self.get_agent_channels(oc_config, self.agent_id)
-            bindings = self.get_agent_bindings(oc_config, self.agent_id)
         else:
             channels = oc_config.get("channels", {})
             agent_channels = {k: v for k, v in channels.items() if v.get("enabled", False)}
-            bindings = []
 
         if not agent_channels:
             result.message = "No channels configured for this agent"
@@ -837,19 +835,13 @@ Agent: {self.agent_id or 'default'}
             "matrix": "hermes-matrix",
         }
 
-        enabled_channels = []
-        for channel in agent_channels.keys():
-            enabled_channels.append(channel)
-            binding_info = ""
-            if bindings:
-                agent_binding = [b for b in bindings if b["channel"] == channel]
-                if agent_binding:
-                    binding_info = f" (account: {agent_binding[0]['account_id']})"
-            self.logger.info(f"Detected channel: {channel}{binding_info}")
+        enabled_channels = list(agent_channels.keys())
 
         if not enabled_channels:
             result.message = "No enabled channels found"
             return result
+
+        self.logger.success(f"Found channels: {', '.join(enabled_channels)}")
 
         if "platform_toolsets" not in hermes_config:
             hermes_config["platform_toolsets"] = {}
@@ -1478,6 +1470,13 @@ Agent: {self.agent_id or 'default'}
                 if primary_model:
                     replacements["LLM_MODEL"] = primary_model
 
+                # Collect all env vars from the migration section to patch
+                for env_line in env_lines:
+                    if "=" in env_line and not env_line.startswith("#"):
+                        key, value = env_line.split("=", 1)
+                        if key.strip():
+                            replacements[key.strip()] = value
+
                 # Collect provider keys/urls to patch in the template
                 for name, prov in providers.items():
                     env_prefix = provider_env_map.get(
@@ -1502,25 +1501,45 @@ Agent: {self.agent_id or 'default'}
 
                 # Apply replacements to existing template lines
                 patched_lines = []
+                actually_patched = set()
                 for line in existing.splitlines():
                     patched = False
                     for key, value in replacements.items():
                         # Match "KEY=" or "# KEY=" (commented template)
                         if line.startswith(f"{key}="):
                             patched_lines.append(f"{key}={value}")
+                            actually_patched.add(key)
                             patched = True
                             break
                         elif line.startswith(f"# {key}="):
                             patched_lines.append(f"{key}={value}")
+                            actually_patched.add(key)
                             patched = True
                             break
                     if not patched:
                         patched_lines.append(line)
 
                 existing = "\n".join(patched_lines) + "\n"
-                env_content = existing + "\n# --- OpenClaw Migration ---\n" + env_content
+
+                # Filter out env vars from append section that were
+                # already patched in the template to avoid duplicates
+                patched_keys = actually_patched
+                filtered_lines = []
+                for env_line in env_lines:
+                    if "=" in env_line and not env_line.startswith("#"):
+                        key = env_line.split("=", 1)[0].strip()
+                        if key in patched_keys:
+                            continue
+                    filtered_lines.append(env_line)
+
+                # Only append if there are non-empty lines left
+                remaining = [ln for ln in filtered_lines if ln.strip() and not ln.startswith("#")]
+                if remaining:
+                    env_content = "\n".join(filtered_lines) + "\n"
+                    existing += "\n# --- OpenClaw Migration ---\n" + env_content
+
                 with open(dst, "w", encoding="utf-8") as f:
-                    f.write(env_content)
+                    f.write(existing)
             else:
                 with open(dst, "w", encoding="utf-8") as f:
                     f.write(env_content)
