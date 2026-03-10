@@ -2085,6 +2085,18 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
                 return False
         return True
 
+    def _prompt_step(self, name: str, description: str) -> bool:
+        """Ask user whether to run a migration step. Returns True to proceed."""
+        if self.dry_run or self.quiet:
+            return True
+        try:
+            answer = input(f"\n  Migrate {name}? ({description}) [Y/n] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+            print("")
+        # Default is yes (empty or y/yes)
+        return answer not in ("n", "no")
+
     def run(self) -> bool:
         """Run the full migration."""
         print("\n  OpenClaw  Hermes Migration Tool")
@@ -2130,30 +2142,78 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
 
         hermes_config = self._load_hermes_config()
 
-        try:
-            # Run migrations - workspace files
-            self.results.append(self.migrate_soul())
-            self.results.append(self.migrate_memory())
-            self.results.append(self.migrate_workspace_files())
-            self.results.append(self.migrate_heartbeat())
+        # Define migration steps grouped by category
+        migration_steps = [
+            (
+                "Persona & Memory",
+                "Migrate SOUL.md, MEMORY.md, and workspace files",
+                [
+                    lambda: self.migrate_soul(),
+                    lambda: self.migrate_memory(),
+                    lambda: self.migrate_workspace_files(),
+                    lambda: self.migrate_heartbeat(),
+                ],
+            ),
+            (
+                "Channels",
+                "Migrate channel bindings (Telegram, Slack, Discord, etc.)",
+                [
+                    lambda: self.migrate_channels(oc_config, hermes_config),
+                ],
+            ),
+            (
+                "Models",
+                "Migrate model and provider configuration",
+                [
+                    lambda: self.migrate_models(oc_config, hermes_config),
+                ],
+            ),
+            (
+                "Agents",
+                "Document multi-agent setup",
+                [
+                    lambda: self.migrate_agents(oc_config),
+                ],
+            ),
+            (
+                "Advanced Config",
+                "Migrate compaction, concurrency, session settings",
+                [
+                    lambda: self.migrate_advanced_config(oc_config, hermes_config),
+                ],
+            ),
+            (
+                "Credentials & Keys",
+                "Copy API keys and tokens to Hermes .env",
+                [
+                    lambda: self.migrate_env_template(oc_config),
+                    lambda: self.migrate_credentials(oc_config),
+                ],
+            ),
+            (
+                "Documentation",
+                "Generate reference docs for channels and infrastructure",
+                [
+                    lambda: self.migrate_channel_details(oc_config),
+                    lambda: self.migrate_infrastructure(oc_config),
+                ],
+            ),
+        ]
 
-            # Run migrations - config and channels
-            self.results.append(self.migrate_channels(oc_config, hermes_config))
-            self.results.append(self.migrate_models(oc_config, hermes_config))
-            self.results.append(self.migrate_agents(oc_config))
-            self.results.append(self.migrate_advanced_config(oc_config, hermes_config))
+        try:
+            config_changed = False
+            for name, description, steps in migration_steps:
+                if not self._prompt_step(name, description):
+                    self.logger.debug(f"Skipped: {name}")
+                    continue
+                for step in steps:
+                    self.results.append(step())
+                if name in ("Channels", "Models", "Advanced Config"):
+                    config_changed = True
 
             # Save config incrementally after config mutations
-            if not self.dry_run:
+            if not self.dry_run and config_changed:
                 self._save_hermes_config(hermes_config)
-
-            # Run migrations - documentation and templates
-            self.results.append(self.migrate_env_template(oc_config))
-            self.results.append(self.migrate_channel_details(oc_config))
-            self.results.append(self.migrate_infrastructure(oc_config))
-
-            # Migrate actual credentials to .env
-            self.results.append(self.migrate_credentials(oc_config))
 
         except Exception as e:
             self.logger.error(f"Migration failed: {e}")
