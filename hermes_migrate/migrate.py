@@ -215,8 +215,13 @@ class HermesInstaller:
             return False
 
     def is_hermes_dir_exists(self) -> bool:
-        """Check if Hermes directory exists."""
-        return HERMES_DIR.exists()
+        """Check if Hermes directory exists with actual Hermes files."""
+        if not HERMES_DIR.exists():
+            return False
+        # An empty or near-empty dir (e.g. created by typing 'hermes')
+        # doesn't count — check for actual Hermes config files
+        markers = ("config.yaml", ".env", "package.json", "hermes.js")
+        return any((HERMES_DIR / m).exists() for m in markers)
 
     def install_hermes(self, interactive: bool = False) -> bool:
         """Install Hermes using the official installer.

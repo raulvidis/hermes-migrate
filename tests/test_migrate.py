@@ -245,9 +245,19 @@ class TestHermesInstaller:
 
     def test_hermes_dir_exists(self, tmp_hermes, monkeypatch):
         monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_hermes)
+        # Need a real Hermes marker file, not just an empty dir
+        (tmp_hermes / "config.yaml").write_text("model:\n  default: gpt-4o\n")
         logger = MigrationLogger()
         installer = HermesInstaller(logger)
         assert installer.is_hermes_dir_exists() is True
+
+    def test_hermes_empty_dir_not_detected(self, tmp_path, monkeypatch):
+        empty = tmp_path / ".hermes"
+        empty.mkdir()
+        monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", empty)
+        logger = MigrationLogger()
+        installer = HermesInstaller(logger)
+        assert installer.is_hermes_dir_exists() is False
 
     def test_hermes_dir_not_exists(self, tmp_path, monkeypatch):
         monkeypatch.setattr("hermes_migrate.migrate.HERMES_DIR", tmp_path / "nonexistent")
