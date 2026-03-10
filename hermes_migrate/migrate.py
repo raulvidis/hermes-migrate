@@ -2087,7 +2087,7 @@ Some have Hermes equivalents (noted), others are OpenClaw-specific.
 
     def _prompt_step(self, name: str, description: str) -> bool:
         """Ask user whether to run a migration step. Returns True to proceed."""
-        if self.dry_run or self.quiet:
+        if self.dry_run or self.logger.quiet:
             return True
         try:
             answer = input(f"\n  Migrate {name}? ({description}) [Y/n] ").strip().lower()
